@@ -72,6 +72,17 @@ install_deps() {
         -r "$PROJECT_DIR/stt-server/requirements.txt" \
         --extra-index-url https://download.pytorch.org/whl/cu121
 
+    # [PYTHON 3.11 FIX] Patch coqpit's broken issubclass check for Python 3.11 Typing features
+    # Coqui-TTS's config parser crashes when checking issubclass() on typing.Union or List in Python 3.11.
+    python3 -c "
+import os
+path = os.path.join('$PROJECT_DIR', 'venv', 'lib', 'python3.11', 'site-packages', 'coqpit', 'coqpit.py')
+if os.path.exists(path):
+    with open(path, 'r') as f: content = f.read()
+    content = content.replace('if issubclass(field_type, Serializable):', 'try:\n        is_ser = issubclass(field_type, Serializable)\n    except TypeError:\n        is_ser = False\n    if is_ser:')
+    with open(path, 'w') as f: f.write(content)
+"
+
     log_success "All dependencies installed in venv!"
 }
 
