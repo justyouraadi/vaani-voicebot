@@ -58,18 +58,19 @@ install_deps() {
     
     # [STABILITY FIX] Guarantee a perfect PyTorch 2.3 golden environment inside the venv
     # PyTorch 2.4 broke transformers and vLLM 0.5.4.
-    # vLLM 0.5.3 has broken lm-format-enforcer constraints.
+    # vLLM 0.4.3 specifically requires torch 2.3.0.
     # We downgrade the entire stack to May 2024 (vLLM 0.4.3 and Transformers 4.40.0)
     # This completely sidesteps all LogitsWarper, DTensor, and pyairports bugs.
     pip install -q --upgrade pip
-    pip install -q torch==2.3.1 torchvision==0.18.1 torchaudio==2.3.1 --index-url https://download.pytorch.org/whl/cu121
     
-    # We combine these into a single command so that pip's resolver enforces the transformers pin
-    # and prevents coqui-tts from silently upgrading transformers to 4.44.0 (which crashes vLLM)
-    pip install -q "transformers==4.40.0" "vllm==0.4.3" "numpy<2.0.0" \
+    # We combine ALL installs into a single command so that pip's resolver guarantees
+    # perfectly aligned versions for torch, torchaudio, transformers, and vLLM.
+    pip install -q "torch==2.3.0" "torchvision==0.18.0" "torchaudio==2.3.0" \
+        "transformers==4.40.0" "vllm==0.4.3" "numpy<2.0.0" \
         -r "$PROJECT_DIR/orchestrator/requirements.txt" \
         -r "$PROJECT_DIR/tts-server/requirements.txt" \
-        -r "$PROJECT_DIR/stt-server/requirements.txt"
+        -r "$PROJECT_DIR/stt-server/requirements.txt" \
+        --extra-index-url https://download.pytorch.org/whl/cu121
 
     log_success "All dependencies installed in venv!"
 }
