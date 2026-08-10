@@ -20,7 +20,13 @@ const els = {
     
     // Synthesis
     textInput: document.getElementById('textInput'),
+    voiceSelect: document.getElementById('voiceSelect'),
     languageSelect: document.getElementById('languageSelect'),
+    emotionSelect: document.getElementById('emotionSelect'),
+    speedSlider: document.getElementById('speedSlider'),
+    tempSlider: document.getElementById('tempSlider'),
+    speedVal: document.getElementById('speedVal'),
+    tempVal: document.getElementById('tempVal'),
     btnGenerate: document.getElementById('btnGenerate'),
     generateBtnText: document.getElementById('generateBtnText'),
     generateBtnIcon: document.getElementById('generateBtnIcon'),
@@ -70,16 +76,17 @@ async function fetchVoices() {
             li.className = `voice-item ${index === 0 ? 'active' : ''}`;
             const sizeKb = (voice.size_bytes / 1024).toFixed(1);
             li.innerHTML = `
-                <div class="voice-info">
+                <div class="voice-info" style="flex: 1;" onclick="selectVoice(this, '${voice.filename}')">
                     <span class="voice-name">${voice.name}</span>
                     <span class="voice-size">${sizeKb} KB</span>
                 </div>
+                <button class="btn-delete" onclick="deleteVoice('${voice.filename}')" title="Delete Voice">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                    </svg>
+                </button>
             `;
-            li.onclick = () => {
-                document.querySelectorAll('.voice-item').forEach(el => el.classList.remove('active'));
-                li.classList.add('active');
-                els.voiceSelect.value = voice.filename;
-            };
+            
             els.voiceList.appendChild(li);
             
             // Add to Dropdown
@@ -97,6 +104,28 @@ async function fetchVoices() {
         els.serverStatus.previousElementSibling.classList.remove('online');
     }
 }
+
+// UI Helpers
+window.selectVoice = function(element, filename) {
+    document.querySelectorAll('.voice-item').forEach(el => el.classList.remove('active'));
+    element.parentElement.classList.add('active');
+    els.voiceSelect.value = filename;
+};
+
+window.deleteVoice = async function(filename) {
+    if (!confirm(`Are you sure you want to delete ${filename}?`)) return;
+    
+    try {
+        const response = await fetch(`${API_BASE}/voices/${filename}`, { method: 'DELETE' });
+        if (!response.ok) {
+            const err = await response.json();
+            throw new Error(err.detail || 'Delete failed');
+        }
+        await fetchVoices();
+    } catch (error) {
+        alert('Error deleting voice: ' + error.message);
+    }
+};
 
 // Upload Audio File
 async function uploadVoice(file) {
@@ -139,9 +168,12 @@ async function uploadVoice(file) {
 
 // Synthesize Speech
 async function generateSpeech() {
-    const text = els.textInput.value.trim();
+    let text = els.textInput.value.trim();
     const voice = els.voiceSelect.value;
     const language = els.languageSelect.value;
+    const emotion = els.emotionSelect.value;
+    let speed = parseFloat(els.speedSlider.value);
+    let temp = parseFloat(els.tempSlider.value);
     
     if (!text) {
         alert("Please enter some text to synthesize.");
@@ -150,6 +182,17 @@ async function generateSpeech() {
     if (!voice) {
         alert("Please select a voice from the library.");
         return;
+    }
+    
+    // Emotion Text Prosody Processing
+    // XTTS v2 responds well to punctuation
+    if (emotion === 'excited') {
+        if (!text.endsWith('!') && !text.endsWith('?')) text += '!';
+    } else if (emotion === 'angry') {
+        text = text.toUpperCase();
+        if (!text.endsWith('!') && !text.endsWith('?')) text += '!!';
+    } else if (emotion === 'sad') {
+        if (!text.endsWith('.') && !text.endsWith('?')) text += '...';
     }
     
     // Set UI to loading state
@@ -171,7 +214,8 @@ async function generateSpeech() {
                 text: text,
                 voice: voice,
                 language: language,
-                speed: 1.0,
+                speed: speed,
+                temperature: temp,
                 stream: false // Request a full WAV file back
             })
         });
@@ -213,6 +257,31 @@ async function generateSpeech() {
 function setupEventListeners() {
     // Generate Button
     els.btnGenerate.addEventListener('click', generateSpeech);
+    
+    // Sliders
+    els.speedSlider.addEventListener('input', (e) => els.speedVal.textContent = e.target.value);
+    els.tempSlider.addEventListener('input', (e) => els.tempVal.textContent = e.target.value);
+    
+    // Emotion Presets
+    els.emotionSelect.addEventListener('change', (e) => {
+        const em = e.target.value;
+        if (em === 'excited') {
+            els.speedSlider.value = 1.15;
+            els.tempSlider.value = 0.85;
+        } else if (em === 'sad') {
+            els.speedSlider.value = 0.85;
+            els.tempSlider.value = 0.65;
+        } else if (em === 'angry') {
+            els.speedSlider.value = 1.25;
+            els.tempSlider.value = 0.9;
+        } else {
+            // Neutral
+            els.speedSlider.value = 1.0;
+            els.tempSlider.value = 0.75;
+        }
+        els.speedVal.textContent = els.speedSlider.value;
+        els.tempVal.textContent = els.tempSlider.value;
+    });
     
     // Drag & Drop
     els.dropzone.addEventListener('click', () => els.fileInput.click());

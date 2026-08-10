@@ -121,6 +121,7 @@ class SynthesizeRequest(BaseModel):
     language: str = XTTS_LANGUAGE
     voice: Optional[str] = None  # Override reference voice
     speed: float = 1.0
+    temperature: float = 0.75 # Variance / expression intensity
     stream: bool = True  # Enable streaming by default
 
 
@@ -244,6 +245,23 @@ async def upload_voice(file: UploadFile = File(...)):
         if temp_path.exists():
             temp_path.unlink()
 
+@app.delete("/voices/{filename}")
+async def delete_voice(filename: str):
+    """Delete a cloned voice file."""
+    if filename == XTTS_VOICE:
+        raise HTTPException(status_code=400, detail="Cannot delete default system voice")
+        
+    voice_path = VOICES_DIR / filename
+    if not voice_path.exists():
+        raise HTTPException(status_code=404, detail="Voice not found")
+        
+    try:
+        voice_path.unlink()
+        return JSONResponse({"status": "success", "message": f"Deleted {filename}"})
+    except Exception as e:
+        logger.error(f"Error deleting voice {filename}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to delete voice")
+
 @app.post("/synthesize")
 async def synthesize(request: SynthesizeRequest):
     """
@@ -281,7 +299,7 @@ async def synthesize(request: SynthesizeRequest):
 
     if request.stream:
         return StreamingResponse(
-            _stream_synthesis(request.text, request.language, current_gpt_cond, current_speaker_emb, request.speed),
+            _stream_synthesis(request.text, request.language, current_gpt_cond, current_speaker_emb, request.speed, request.temperature),
             media_type="audio/pcm",
             headers={
                 "X-Sample-Rate": str(OUTPUT_SAMPLE_RATE),
@@ -291,7 +309,7 @@ async def synthesize(request: SynthesizeRequest):
             },
         )
     else:
-        return await _full_synthesis(request.text, request.language, current_gpt_cond, current_speaker_emb, request.speed)
+        return await _full_synthesis(request.text, request.language, current_gpt_cond, current_speaker_emb, request.speed, request.temperature)
 
 
 async def _stream_synthesis(
@@ -300,6 +318,7 @@ async def _stream_synthesis(
     gpt_cond: Optional[torch.Tensor],
     speaker_emb: Optional[torch.Tensor],
     speed: float,
+    temperature: float,
 ):
     """
     Generator that yields audio chunks as XTTS v2 generates them.
@@ -319,6 +338,7 @@ async def _stream_synthesis(
                 gpt_cond,
                 speaker_emb,
                 speed=speed,
+                temperature=temperature,
                 enable_text_splitting=True,
             )
         else:
@@ -329,6 +349,8 @@ async def _stream_synthesis(
                 language,
                 gpt_cond_latent=None,
                 speaker_embedding=None,
+                speed=speed,
+                temperature=temperature,
             )
             audio = result["wav"]
             audio_np = audio.cpu().numpy() if isinstance(audio, torch.Tensor) else np.array(audio)
@@ -375,6 +397,7 @@ async def _full_synthesis(
     gpt_cond: Optional[torch.Tensor],
     speaker_emb: Optional[torch.Tensor],
     speed: float,
+    temperature: float,
 ):
     """Full (non-streaming) synthesis returning a complete WAV file."""
     start_time = time.perf_counter()
@@ -386,9 +409,10 @@ async def _full_synthesis(
             gpt_cond_latent=gpt_cond,
             speaker_embedding=speaker_emb,
             speed=speed,
+            temperature=temperature,
         )
     else:
-        result = tts_model.inference(text, language)
+        result = tts_model.inference(text, language, speed=speed, temperature=temperature)
 
     audio = result["wav"]
     if isinstance(audio, torch.Tensor):

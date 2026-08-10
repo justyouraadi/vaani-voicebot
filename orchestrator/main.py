@@ -116,6 +116,13 @@ async def upload_voice(file: UploadFile = File(...)):
         resp = await client.post(f"{settings.tts_server_url.replace('/synthesize', '')}/voices", files=files)
         return JSONResponse(resp.json(), status_code=resp.status_code)
 
+@app.delete("/api/voices/{filename}")
+async def delete_voice(filename: str):
+    """Proxy to delete a voice."""
+    async with httpx.AsyncClient() as client:
+        resp = await client.delete(f"{settings.tts_server_url.replace('/synthesize', '')}/voices/{filename}")
+        return JSONResponse(resp.json(), status_code=resp.status_code)
+
 @app.post("/api/synthesize")
 async def synthesize_proxy(request: Request):
     """Proxy synthesize request to TTS server, stream audio back."""
