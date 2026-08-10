@@ -76,7 +76,7 @@ install_deps() {
     # Coqui-TTS's config parser crashes when checking issubclass() on typing.Union or List in Python 3.11.
     python3 -c "
 import os
-path = os.path.join('$PROJECT_DIR', 'venv', 'lib', 'python3.11', 'site-packages', 'coqpit', 'coqpit.py')
+path = '/workspace/venv/lib/python3.11/site-packages/coqpit/coqpit.py'
 if os.path.exists(path):
     with open(path, 'r') as f: content = f.read()
     content = content.replace('issubclass(type(x), Serializable)', 'safe_issubclass(type(x), Serializable)')
