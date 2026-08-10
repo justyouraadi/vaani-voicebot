@@ -72,8 +72,9 @@ install_deps() {
         -r "$PROJECT_DIR/stt-server/requirements.txt" \
         --extra-index-url https://download.pytorch.org/whl/cu121
 
-    # [PYTHON 3.11 FIX] Patch coqpit's broken issubclass check for Python 3.11 Typing features
-    # Coqui-TTS's config parser crashes when checking issubclass() on typing.Union or List in Python 3.11.
+    # [PYTHON 3.11 FIX] Patch coqpit's broken checks for Python 3.11 Typing features
+    # 1. issubclass() crashes on typing.Union or List in Python 3.11
+    # 2. is_union() fails to detect the new Python 3.10+ types.UnionType (the | operator)
     python3 -c "
 import os
 path = '/workspace/venv/lib/python3.11/site-packages/coqpit/coqpit.py'
@@ -82,6 +83,7 @@ if os.path.exists(path):
     content = content.replace('issubclass(type(x), Serializable)', 'safe_issubclass(type(x), Serializable)')
     content = content.replace('issubclass(x, Serializable)', 'safe_issubclass(x, Serializable)')
     content = content.replace('issubclass(field_type, Serializable)', 'safe_issubclass(field_type, Serializable)')
+    content = content.replace('def is_union(arg_type: Any) -> bool:', 'def is_union(arg_type: Any) -> bool:\n    import types\n    if getattr(types, \"UnionType\", None) and isinstance(arg_type, types.UnionType): return True')
     with open(path, 'w') as f: f.write(content)
 "
 
