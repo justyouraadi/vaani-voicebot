@@ -1,0 +1,43 @@
+# Environment
+.env
+*.env.local
+.venv/
+venv/
+env/
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Models (large files)
+*.bin
+*.pt
+*.pth
+*.onnx
+*.safetensors
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+.docker/
+
+# Logs
+*.log
+logs/
+
+# Voice samples (keep structure, ignore large files)
+tts-server/voices/*.wav
+!tts-server/voices/.gitkeep

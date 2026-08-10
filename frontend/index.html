@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="VaaniAI — Ultra-low latency Hindi voice AI assistant powered by streaming STT, LLM, and TTS">
+    <title>🎙️ VaaniAI — Voice AI Assistant</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Background Particles -->
+        <div class="particles" id="particles"></div>
+
+        <!-- Header -->
+        <header class="header">
+            <div class="header-left">
+                <div class="logo">
+                    <span class="logo-icon">🎙️</span>
+                    <div class="logo-text">
+                        <h1>VaaniAI</h1>
+                        <span class="logo-tagline">Ultra-Low Latency Voice AI</span>
+                    </div>
+                </div>
+            </div>
+            <div class="header-right">
+                <div class="connection-status" id="connectionStatus">
+                    <div class="status-dot" id="statusDot"></div>
+                    <span id="statusText">Disconnected</span>
+                </div>
+                <button class="btn-icon" id="btnSettings" title="Settings" aria-label="Settings">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+                    </svg>
+                </button>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Voice Orb -->
+            <div class="orb-container" id="orbContainer">
+                <div class="orb-glow" id="orbGlow"></div>
+                <div class="orb-rings">
+                    <div class="orb-ring ring-1"></div>
+                    <div class="orb-ring ring-2"></div>
+                    <div class="orb-ring ring-3"></div>
+                </div>
+                <button class="voice-orb" id="voiceOrb" aria-label="Start voice conversation">
+                    <div class="orb-inner">
+                        <svg class="mic-icon" id="micIcon" width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                            <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                            <line x1="12" y1="19" x2="12" y2="23"/>
+                            <line x1="8" y1="23" x2="16" y2="23"/>
+                        </svg>
+                        <svg class="stop-icon hidden" id="stopIcon" width="32" height="32" viewBox="0 0 24 24" fill="currentColor">
+                            <rect x="6" y="6" width="12" height="12" rx="2"/>
+                        </svg>
+                    </div>
+                </button>
+                <div class="orb-label" id="orbLabel">Click to start</div>
+            </div>
+
+            <!-- Waveform Visualizer -->
+            <div class="waveform-container" id="waveformContainer">
+                <canvas id="waveformCanvas" width="600" height="80"></canvas>
+            </div>
+
+            <!-- Transcript Panel -->
+            <div class="transcript-panel" id="transcriptPanel">
+                <div class="transcript-header">
+                    <span class="transcript-title">Conversation</span>
+                    <button class="btn-text" id="btnClearChat" title="Clear conversation">Clear</button>
+                </div>
+                <div class="transcript-messages" id="transcriptMessages">
+                    <div class="message system-message">
+                        <div class="message-content">
+                            <p>Namaste! 🙏 Main Vaani hoon, aapki AI voice assistant. Mic button dabayein aur Hindi ya Hinglish mein baat karein.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Latency Dashboard -->
+        <footer class="latency-dashboard" id="latencyDashboard">
+            <div class="metric-card">
+                <div class="metric-value" id="metricTTFA">—</div>
+                <div class="metric-label">TTFA</div>
+                <div class="metric-sublabel">Time to First Audio</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-value" id="metricSTT">—</div>
+                <div class="metric-label">STT</div>
+                <div class="metric-sublabel">Transcription</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-value" id="metricLLM">—</div>
+                <div class="metric-label">LLM</div>
+                <div class="metric-sublabel">First Token</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-value" id="metricTotal">—</div>
+                <div class="metric-label">Total</div>
+                <div class="metric-sublabel">Full Pipeline</div>
+            </div>
+            <div class="metric-card metric-barge-in">
+                <div class="metric-value" id="metricBargeIn">0</div>
+                <div class="metric-label">Barge-ins</div>
+                <div class="metric-sublabel">Interruptions</div>
+            </div>
+        </footer>
+    </div>
+
+    <!-- Settings Modal -->
+    <div class="modal-overlay hidden" id="settingsModal">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h2>Settings</h2>
+                <button class="btn-icon" id="btnCloseSettings" aria-label="Close settings">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="setting-group">
+                    <label for="inputMode">Input Mode</label>
+                    <select id="inputMode">
+                        <option value="handsfree">Hands-free (VAD)</option>
+                        <option value="ptt">Push-to-Talk</option>
+                    </select>
+                </div>
+                <div class="setting-group">
+                    <label for="serverUrl">Server URL</label>
+                    <input type="text" id="serverUrl" value="" placeholder="ws://localhost:8080/ws/audio">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

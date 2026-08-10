@@ -1,0 +1,146 @@
+version: "3.9"
+
+# ============================================================
+# TBB-VaaniAI — Docker Compose Stack
+# Runs STT, TTS, and Orchestrator services with GPU support.
+# vLLM is assumed to be an external service (configurable endpoint).
+# ============================================================
+
+services:
+  # ─────────────────────────────────────────────
+  # 👂 Pillar 1: STT Server (Faster-Whisper + Silero VAD)
+  # ─────────────────────────────────────────────
+  stt-server:
+    build:
+      context: ./stt-server
+      dockerfile: Dockerfile
+    container_name: vaani-stt
+    ports:
+      - "${STT_SERVER_PORT:-8001}:8001"
+    environment:
+      - WHISPER_MODEL=${WHISPER_MODEL:-large-v3-turbo}
+      - WHISPER_LANGUAGE=${WHISPER_LANGUAGE:-hi}
+      - WHISPER_DEVICE=${WHISPER_DEVICE:-cuda}
+      - WHISPER_COMPUTE_TYPE=${WHISPER_COMPUTE_TYPE:-float16}
+      - VAD_THRESHOLD=${VAD_THRESHOLD:-0.5}
+      - VAD_MIN_SILENCE_MS=${VAD_MIN_SILENCE_MS:-300}
+      - VAD_SPEECH_PAD_MS=${VAD_SPEECH_PAD_MS:-100}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # ─────────────────────────────────────────────
+  # 🗣️ Pillar 3: TTS Server (XTTS v2 Streaming)
+  # ─────────────────────────────────────────────
+  tts-server:
+    build:
+      context: ./tts-server
+      dockerfile: Dockerfile
+    container_name: vaani-tts
+    ports:
+      - "${TTS_SERVER_PORT:-8002}:8002"
+    environment:
+      - XTTS_MODEL=${XTTS_MODEL:-tts_models/multilingual/multi-dataset/xtts_v2}
+      - XTTS_VOICE=${XTTS_VOICE:-vaani_default.wav}
+      - XTTS_LANGUAGE=${XTTS_LANGUAGE:-hi}
+      - XTTS_DEVICE=${XTTS_DEVICE:-cuda}
+    volumes:
+      - ./tts-server/voices:/app/voices:ro
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+
+  # ─────────────────────────────────────────────
+  # 🧠 Pillar 2: LLM Server (vLLM)
+  # ─────────────────────────────────────────────
+  vllm-server:
+    image: vllm/vllm-openai:latest
+    container_name: vaani-vllm
+    ports:
+      - "8000:8000"
+    command: >
+      --host 0.0.0.0
+      --port 8000
+      --model Qwen/Qwen2.5-7B-Instruct
+      --dtype bfloat16
+      --enforce-eager
+      --gpu-memory-utilization 0.70
+      --max-model-len 8128
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # ─────────────────────────────────────────────
+  # 🎛️ Pillar 4: Orchestrator (FastAPI + Pipecat)
+  # ─────────────────────────────────────────────
+  orchestrator:
+    build:
+      context: ./orchestrator
+      dockerfile: Dockerfile
+    container_name: vaani-orchestrator
+    ports:
+      - "${ORCHESTRATOR_PORT:-8080}:8080"
+    environment:
+      - VLLM_BASE_URL=${VLLM_BASE_URL:-http://vllm-server:8000/v1}
+      - VLLM_MODEL=${VLLM_MODEL:-Qwen/Qwen2.5-7B-Instruct}
+      - VLLM_API_KEY=${VLLM_API_KEY:-EMPTY}
+      - LLM_MAX_TOKENS=${LLM_MAX_TOKENS:-256}
+      - LLM_TEMPERATURE=${LLM_TEMPERATURE:-0.7}
+      - STT_SERVER_URL=ws://stt-server:8001/ws/transcribe
+      - TTS_SERVER_URL=http://tts-server:8002/synthesize
+      - VAD_THRESHOLD=${VAD_THRESHOLD:-0.5}
+      - VAD_MIN_SILENCE_MS=${VAD_MIN_SILENCE_MS:-300}
+      - SENTENCE_CHUNK_MIN_WORDS=${SENTENCE_CHUNK_MIN_WORDS:-3}
+      - SENTENCE_CHUNK_MAX_WAIT_MS=${SENTENCE_CHUNK_MAX_WAIT_MS:-500}
+      - FILLER_WORDS=${FILLER_WORDS:-Ji,Hmm,Achha,Dekhiye,Bilkul}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - AUDIO_SAMPLE_RATE=${AUDIO_SAMPLE_RATE:-16000}
+    volumes:
+      - ./frontend:/app/frontend:ro
+    depends_on:
+      stt-server:
+        condition: service_healthy
+      tts-server:
+        condition: service_healthy
+      vllm-server:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
