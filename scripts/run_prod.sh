@@ -52,13 +52,13 @@ install_deps() {
 
     log_info "Installing Python requirements (this may take a few minutes)..."
     
-    # [STABILITY FIX] Pin exact versions to prevent RunPod template clashes
-    # Pin transformers < 4.44 to prevent LogitsWarper import error in vLLM/lm-format-enforcer
+    # [STABILITY FIX] Guarantee a perfect PyTorch 2.3 golden environment
+    # PyTorch 2.4 broke transformers 4.43 and vLLM 0.5.4 requires PyTorch 2.4.
+    # We must pin everything back to the stable Torch 2.3 era.
+    pip install -q "numpy<2.0.0" pyairports
+    pip install -q --upgrade --force-reinstall torch==2.3.0 torchvision==0.18.0 torchaudio==2.3.0 --index-url https://download.pytorch.org/whl/cu121
     pip install -q "transformers==4.43.3"
-    
-    # Force reinstall PyTorch to fix corrupted C++ binaries from previous runs
-    pip install -q --upgrade --force-reinstall torch==2.4.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
-    pip install -q vllm
+    pip install -q "vllm==0.5.3.post1"
 
     pip install -q -r "$PROJECT_DIR/orchestrator/requirements.txt"
     pip install -q -r "$PROJECT_DIR/tts-server/requirements.txt"
