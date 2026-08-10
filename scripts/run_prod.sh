@@ -32,9 +32,9 @@ print_banner() {
 
 cleanup() {
     log_info "Shutting down all services..."
-    fuser -k 8000/tcp 2>/dev/null || true
-    fuser -k 8001/tcp 2>/dev/null || true
-    fuser -k 8002/tcp 2>/dev/null || true
+    fuser -k 9000/tcp 2>/dev/null || true
+    fuser -k 9001/tcp 2>/dev/null || true
+    fuser -k 9002/tcp 2>/dev/null || true
     fuser -k 8080/tcp 2>/dev/null || true
     kill $(jobs -p) 2>/dev/null || true
     wait 2>/dev/null || true
@@ -53,11 +53,9 @@ install_deps() {
     log_info "Installing Python requirements (this may take a few minutes)..."
     
     # [STABILITY FIX] Pin exact versions to prevent RunPod template clashes
-    # 1. Force matching torch/torchaudio (vLLM downgrades torch to 2.3.0 but leaves torchaudio at 2.4.0 causing C++ crashes)
-    # 2. Pin transformers < 4.44 to prevent LogitsWarper import error in vLLM/lm-format-enforcer
-    pip install -q torch==2.3.0 torchvision==0.18.0 torchaudio==2.3.0 --index-url https://download.pytorch.org/whl/cu121
+    # Pin transformers < 4.44 to prevent LogitsWarper import error in vLLM/lm-format-enforcer
     pip install -q "transformers==4.43.3"
-    pip install -q vllm==0.5.4
+    pip install -q vllm
 
     pip install -q -r "$PROJECT_DIR/orchestrator/requirements.txt"
     pip install -q -r "$PROJECT_DIR/tts-server/requirements.txt"
@@ -73,14 +71,14 @@ setup_env() {
     if [ ! -f "$PROJECT_DIR/.env" ]; then
         log_info "Creating production .env file..."
         cat > "$PROJECT_DIR/.env" << 'EOF'
-VLLM_BASE_URL=http://localhost:8000/v1
+VLLM_BASE_URL=http://localhost:9000/v1
 VLLM_MODEL=Qwen/Qwen2.5-7B-Instruct
 VLLM_API_KEY=EMPTY
 LLM_MAX_TOKENS=256
 LLM_TEMPERATURE=0.7
 
-STT_SERVER_URL=ws://localhost:8001/ws/transcribe
-TTS_SERVER_URL=http://localhost:8002/synthesize
+STT_SERVER_URL=ws://localhost:9001/ws/transcribe
+TTS_SERVER_URL=http://localhost:9002/synthesize
 
 WHISPER_MODEL=large-v3-turbo
 WHISPER_LANGUAGE=hi
@@ -107,10 +105,10 @@ start_services() {
     set +a
 
     echo ""
-    log_info "Starting vLLM Server (port 8000)..."
+    log_info "Starting vLLM Server (port 9000)..."
     VLLM_USE_V1=0 python -m vllm.entrypoints.openai.api_server \
         --host 0.0.0.0 \
-        --port 8000 \
+        --port 9000 \
         --model Qwen/Qwen2.5-7B-Instruct \
         --gpu-memory-utilization 0.60 \
         --max-model-len 8128 &
@@ -120,13 +118,13 @@ start_services() {
     log_info "Waiting 45 seconds for vLLM to initialize..."
     sleep 45
 
-    log_info "Starting STT Server (port 8001)..."
-    python stt-server/server.py &
+    log_info "Starting STT Server (port 9001)..."
+    STT_SERVER_PORT=9001 python stt-server/server.py &
     STT_PID=$!
     sleep 5
 
-    log_info "Starting TTS Server (port 8002)..."
-    python tts-server/server.py &
+    log_info "Starting TTS Server (port 9002)..."
+    TTS_SERVER_PORT=9002 python tts-server/server.py &
     TTS_PID=$!
     sleep 5
 
@@ -150,9 +148,9 @@ start_services() {
 main() {
     print_banner
     # Ensure no ghost processes from a previous crash are holding the ports
-    fuser -k 8000/tcp 2>/dev/null || true
-    fuser -k 8001/tcp 2>/dev/null || true
-    fuser -k 8002/tcp 2>/dev/null || true
+    fuser -k 9000/tcp 2>/dev/null || true
+    fuser -k 9001/tcp 2>/dev/null || true
+    fuser -k 9002/tcp 2>/dev/null || true
     fuser -k 8080/tcp 2>/dev/null || true
 
     export COQUI_TOS_AGREED=1
