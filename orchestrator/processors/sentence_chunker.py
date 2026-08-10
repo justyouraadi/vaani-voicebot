@@ -89,10 +89,26 @@ class SentenceChunker:
                     reason = "timeout"
 
             if should_flush and current_text:
-                logger.debug(f"Chunk flush ({reason}): \"{current_text}\"")
-                self._buffer = []
-                self._last_flush_time = time.perf_counter()
-                yield current_text
+                if reason in ("timeout", "clause_break") and not current_text.endswith(" "):
+                    # If we flush mid-stream, the last word might still be generating!
+                    # Example: LLM emitted "Bha", next token is "i". If we flush now, we get "Bha".
+                    # We MUST keep the last incomplete word in the buffer.
+                    words = current_text.split(" ")
+                    if len(words) > 1:
+                        complete_text = " ".join(words[:-1])
+                        kept_word = words[-1]
+                        logger.debug(f"Chunk flush ({reason}): \"{complete_text}\" (kept: \"{kept_word}\")")
+                        self._buffer = [kept_word]
+                        self._last_flush_time = time.perf_counter()
+                        yield complete_text
+                    else:
+                        # Cannot split into complete words, wait for more tokens
+                        continue
+                else:
+                    logger.debug(f"Chunk flush ({reason}): \"{current_text}\"")
+                    self._buffer = []
+                    self._last_flush_time = time.perf_counter()
+                    yield current_text
 
         # Flush remaining buffer at end of stream
         remaining = "".join(self._buffer).strip()
