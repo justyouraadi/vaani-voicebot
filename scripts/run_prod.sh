@@ -63,7 +63,8 @@ install_deps() {
     
     # We combine these into a single command so that pip's resolver enforces the transformers pin
     # and prevents coqui-tts from silently upgrading transformers to 4.44.0 (which crashes vLLM)
-    pip install -q "transformers==4.43.3" "vllm==0.5.3.post1" "numpy<2.0.0" pyairports \
+    # We pin transformers==4.40.0 which contains LogitsWarper and is compatible with torch 2.3.1 DTensor.
+    pip install -q "transformers==4.40.0" "vllm==0.5.3.post1" "numpy<2.0.0" "pyairports==2.1.1" pycountry \
         -r "$PROJECT_DIR/orchestrator/requirements.txt" \
         -r "$PROJECT_DIR/tts-server/requirements.txt" \
         -r "$PROJECT_DIR/stt-server/requirements.txt"
