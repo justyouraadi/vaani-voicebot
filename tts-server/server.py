@@ -16,9 +16,17 @@ import wave
 import struct
 import logging
 import numpy as np
+import time
+import asyncio
+import logging
 import torch
 from pathlib import Path
 from typing import Optional
+
+# [WORKAROUND] Monkeypatch for transformers >= 4.40 breaking older Coqui TTS
+import transformers.pytorch_utils
+if not hasattr(transformers.pytorch_utils, 'isin_mps_friendly'):
+    transformers.pytorch_utils.isin_mps_friendly = lambda *args, **kwargs: False
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse, JSONResponse

@@ -7,7 +7,7 @@
 // Configuration
 // ─────────────────────────────────────────────
 const CONFIG = {
-    WS_URL: `ws://${window.location.host}/ws/audio`,
+    WS_URL: `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/ws/audio`,
     SAMPLE_RATE_IN: 16000,   // PCM sent to server
     SAMPLE_RATE_OUT: 24000,  // PCM received from server (TTS output)
     RECONNECT_DELAY: 3000,

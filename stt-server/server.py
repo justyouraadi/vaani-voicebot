@@ -71,6 +71,7 @@ vad_model, vad_utils = torch.hub.load(
     model="silero_vad",
     force_reload=False,
     onnx=True,
+    trust_repo=True,
 )
 (get_speech_timestamps, _, read_audio, _, _) = vad_utils
 logger.info("Silero VAD model loaded successfully")
