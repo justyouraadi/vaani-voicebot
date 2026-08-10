@@ -150,12 +150,35 @@ start_services() {
     log_info "Starting STT Server (port 9001)..."
     STT_SERVER_PORT=9001 python stt-server/server.py 2>&1 | tee -a stt.log &
     STT_PID=$!
-    sleep 5
+    
+    # Wait for STT to bind port
+    while ! curl -s http://localhost:9001/health > /dev/null; do
+        if ! kill -0 $STT_PID 2>/dev/null; then
+            echo ""
+            log_error "STT Server crashed! Here is the log:"
+            cat stt.log
+            exit 1
+        fi
+        sleep 1
+    done
+    log_success "STT Server is ready!"
 
     log_info "Starting TTS Server (port 9002)..."
     TTS_SERVER_PORT=9002 python tts-server/server.py 2>&1 | tee -a tts.log &
     TTS_PID=$!
-    sleep 5
+    
+    # Wait for TTS to load model and bind port
+    log_info "Waiting for TTS model to load (this takes ~10s)..."
+    while ! curl -s http://localhost:9002/health > /dev/null; do
+        if ! kill -0 $TTS_PID 2>/dev/null; then
+            echo ""
+            log_error "TTS Server crashed! Here is the log:"
+            cat tts.log
+            exit 1
+        fi
+        sleep 1
+    done
+    log_success "TTS Server is ready!"
 
     log_info "Starting Orchestrator (port 8080)..."
     FRONTEND_DIR="$PROJECT_DIR/frontend" python orchestrator/main.py 2>&1 | tee -a orchestrator.log &
