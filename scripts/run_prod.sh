@@ -51,10 +51,13 @@ install_deps() {
     apt-get update -yqq && apt-get install -yqq ffmpeg psmisc
 
     log_info "Installing Python requirements (this may take a few minutes)..."
+    # Downgrade PyTorch to CUDA 11.8 version to fix the "NVIDIA driver too old" error on community cloud
+    pip install -q torch==2.1.2 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+    
     pip install -q -r "$PROJECT_DIR/orchestrator/requirements.txt"
     pip install -q -r "$PROJECT_DIR/tts-server/requirements.txt"
     pip install -q -r "$PROJECT_DIR/stt-server/requirements.txt"
-    pip install -q vllm
+    pip install -q vllm==0.4.2
 
     log_success "All dependencies installed!"
 }
@@ -101,7 +104,7 @@ start_services() {
 
     echo ""
     log_info "Starting vLLM Server (port 8000)..."
-    VLLM_USE_V1=0 python -m vllm.entrypoints.openai.api_server \
+    python -m vllm.entrypoints.openai.api_server \
         --host 0.0.0.0 \
         --port 8000 \
         --model Qwen/Qwen2.5-7B-Instruct \
