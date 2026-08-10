@@ -128,6 +128,11 @@ start_services() {
     source .env 2>/dev/null || true
     set +a
 
+    # [STABILITY FIX] Ensure torchaudio can find the pip-installed libcudart.so.12
+    # The pip wheel for torch 2.3.0 installs CUDA libraries into the nvidia folder,
+    # but the OS dynamic linker doesn't know about it unless we export it!
+    export LD_LIBRARY_PATH="/workspace/venv/lib/python3.11/site-packages/nvidia/cuda_runtime/lib:${LD_LIBRARY_PATH:-}"
+
     echo ""
     log_info "Starting vLLM Server (port 9000)..."
     VLLM_USE_V1=0 python -m vllm.entrypoints.openai.api_server \
@@ -143,17 +148,17 @@ start_services() {
     sleep 45
 
     log_info "Starting STT Server (port 9001)..."
-    STT_SERVER_PORT=9001 python stt-server/server.py &
+    STT_SERVER_PORT=9001 python stt-server/server.py 2>&1 | tee -a stt.log &
     STT_PID=$!
     sleep 5
 
     log_info "Starting TTS Server (port 9002)..."
-    TTS_SERVER_PORT=9002 python tts-server/server.py &
+    TTS_SERVER_PORT=9002 python tts-server/server.py 2>&1 | tee -a tts.log &
     TTS_PID=$!
     sleep 5
 
     log_info "Starting Orchestrator (port 8080)..."
-    FRONTEND_DIR="$PROJECT_DIR/frontend" python orchestrator/main.py &
+    FRONTEND_DIR="$PROJECT_DIR/frontend" python orchestrator/main.py 2>&1 | tee -a orchestrator.log &
     ORCH_PID=$!
 
     echo ""
