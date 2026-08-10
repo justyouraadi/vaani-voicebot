@@ -13,9 +13,10 @@ import time
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, UploadFile, File
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+import httpx
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
@@ -96,7 +97,46 @@ async def serve_worklet():
 
 
 # ─────────────────────────────────────────────
-# API Routes
+# API Routes (TTS Proxy)
+# ─────────────────────────────────────────────
+@app.get("/api/voices")
+async def get_voices():
+    """Proxy to get list of voices."""
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(f"{settings.tts_server_url.replace('/synthesize', '')}/voices")
+        return JSONResponse(resp.json(), status_code=resp.status_code)
+
+@app.post("/api/voices")
+async def upload_voice(file: UploadFile = File(...)):
+    """Proxy to upload a new voice."""
+    async with httpx.AsyncClient() as client:
+        # Read the file to forward it
+        file_content = await file.read()
+        files = {"file": (file.filename, file_content, file.content_type)}
+        resp = await client.post(f"{settings.tts_server_url.replace('/synthesize', '')}/voices", files=files)
+        return JSONResponse(resp.json(), status_code=resp.status_code)
+
+@app.post("/api/synthesize")
+async def synthesize_proxy(request: Request):
+    """Proxy synthesize request to TTS server, stream audio back."""
+    body = await request.json()
+    
+    async def stream_audio():
+        async with httpx.AsyncClient() as client:
+            async with client.stream("POST", settings.tts_server_url, json=body) as response:
+                async for chunk in response.aiter_bytes():
+                    yield chunk
+
+    return StreamingResponse(
+        stream_audio(),
+        media_type="audio/pcm",
+        headers={
+            "Transfer-Encoding": "chunked",
+        }
+    )
+
+# ─────────────────────────────────────────────
+# System API
 # ─────────────────────────────────────────────
 @app.get("/health")
 async def health_check():

@@ -16,6 +16,7 @@ import wave
 import struct
 import logging
 import numpy as np
+import subprocess
 import time
 import asyncio
 import logging
@@ -28,7 +29,7 @@ import transformers.pytorch_utils
 if not hasattr(transformers.pytorch_utils, 'isin_mps_friendly'):
     transformers.pytorch_utils.isin_mps_friendly = lambda *args, **kwargs: False
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel
 import uvicorn
@@ -194,6 +195,54 @@ async def list_voices():
             })
     return JSONResponse({"voices": voices, "default": XTTS_VOICE})
 
+
+@app.post("/voices")
+async def upload_voice(file: UploadFile = File(...)):
+    """Upload a new reference voice file and convert it for XTTS."""
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No filename provided")
+    
+    # Secure filename
+    safe_name = file.filename.replace(" ", "_").lower()
+    base_name = Path(safe_name).stem
+    final_filename = f"{base_name}.wav"
+    
+    VOICES_DIR.mkdir(parents=True, exist_ok=True)
+    temp_path = VOICES_DIR / f"temp_{safe_name}"
+    final_path = VOICES_DIR / final_filename
+    
+    try:
+        # Save uploaded file
+        with open(temp_path, "wb") as buffer:
+            buffer.write(await file.read())
+            
+        # Convert to 24kHz Mono 16-bit PCM WAV using ffmpeg
+        logger.info(f"Converting uploaded voice {safe_name} to {final_filename}...")
+        cmd = [
+            "ffmpeg", "-y", "-i", str(temp_path),
+            "-ar", "24000", "-ac", "1", "-c:a", "pcm_s16le",
+            str(final_path)
+        ]
+        
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            logger.error(f"FFmpeg error: {result.stderr}")
+            raise HTTPException(status_code=500, detail="Audio conversion failed")
+            
+        logger.info(f"Successfully processed voice clone: {final_filename}")
+        
+        # Pre-compute and cache the embeddings for this new voice
+        if tts_model is not None:
+            tts_model.get_conditioning_latents(audio_path=[str(final_path)])
+            
+        return JSONResponse({"status": "success", "filename": final_filename})
+        
+    except Exception as e:
+        logger.error(f"Error processing upload: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if temp_path.exists():
+            temp_path.unlink()
 
 @app.post("/synthesize")
 async def synthesize(request: SynthesizeRequest):
