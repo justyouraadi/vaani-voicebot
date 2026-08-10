@@ -138,6 +138,17 @@ start_services() {
     # but the OS dynamic linker doesn't know about it unless we export it!
     export LD_LIBRARY_PATH="/workspace/venv/lib/python3.11/site-packages/nvidia/cuda_runtime/lib:${LD_LIBRARY_PATH:-}"
 
+    # [VOICE CLONING SETUP]
+    # XTTS v2 requires a reference voice to clone. If none is provided, it crashes with a NoneType error.
+    # We create the directory and download a default high-quality reference voice.
+    export VOICES_DIR="$PROJECT_DIR/voices"
+    mkdir -p "$VOICES_DIR"
+    if [ ! -f "$VOICES_DIR/vaani_default.wav" ]; then
+        log_info "No reference voice found. Downloading default voice..."
+        curl -sL "https://huggingface.co/coqui/XTTS-v2/resolve/main/samples/en_sample.wav" -o "$VOICES_DIR/vaani_default.wav"
+        log_success "Downloaded default voice."
+    fi
+
     echo ""
     log_info "Starting vLLM Server (port 9000)..."
     VLLM_USE_V1=0 python -m vllm.entrypoints.openai.api_server \
