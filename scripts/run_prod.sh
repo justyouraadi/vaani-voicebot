@@ -47,8 +47,8 @@ trap cleanup EXIT INT TERM
 # Step 1: Install Dependencies
 # ─────────────────────────────────────────────
 install_deps() {
-    log_info "Installing system dependencies (ffmpeg)..."
-    apt-get update -yqq && apt-get install -yqq ffmpeg
+    log_info "Installing system dependencies (ffmpeg, psmisc)..."
+    apt-get update -yqq && apt-get install -yqq ffmpeg psmisc
 
     log_info "Installing Python requirements (this may take a few minutes)..."
     pip install -q -r "$PROJECT_DIR/orchestrator/requirements.txt"
