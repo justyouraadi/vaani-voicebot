@@ -32,10 +32,10 @@ print_banner() {
 
 cleanup() {
     log_info "Shutting down all services..."
-    pkill -f "vllm.entrypoints.openai.api_server" || true
-    pkill -f "stt-server/server.py" || true
-    pkill -f "tts-server/server.py" || true
-    pkill -f "orchestrator/main.py" || true
+    fuser -k 8000/tcp 2>/dev/null || true
+    fuser -k 8001/tcp 2>/dev/null || true
+    fuser -k 8002/tcp 2>/dev/null || true
+    fuser -k 8080/tcp 2>/dev/null || true
     kill $(jobs -p) 2>/dev/null || true
     wait 2>/dev/null || true
     log_success "All services stopped"
@@ -143,10 +143,10 @@ start_services() {
 main() {
     print_banner
     # Ensure no ghost processes from a previous crash are holding the ports
-    pkill -f "vllm.entrypoints.openai.api_server" || true
-    pkill -f "stt-server/server.py" || true
-    pkill -f "tts-server/server.py" || true
-    pkill -f "orchestrator/main.py" || true
+    fuser -k 8000/tcp 2>/dev/null || true
+    fuser -k 8001/tcp 2>/dev/null || true
+    fuser -k 8002/tcp 2>/dev/null || true
+    fuser -k 8080/tcp 2>/dev/null || true
 
     export COQUI_TOS_AGREED=1
 
