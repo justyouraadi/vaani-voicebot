@@ -55,6 +55,9 @@ install_deps() {
     # [STABILITY FIX] Pin exact versions to prevent RunPod template clashes
     # Pin transformers < 4.44 to prevent LogitsWarper import error in vLLM/lm-format-enforcer
     pip install -q "transformers==4.43.3"
+    
+    # Force reinstall PyTorch to fix corrupted C++ binaries from previous runs
+    pip install -q --upgrade --force-reinstall torch==2.4.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
     pip install -q vllm
 
     pip install -q -r "$PROJECT_DIR/orchestrator/requirements.txt"
