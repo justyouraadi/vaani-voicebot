@@ -51,10 +51,17 @@ install_deps() {
     apt-get update -yqq && apt-get install -yqq ffmpeg psmisc
 
     log_info "Installing Python requirements (this may take a few minutes)..."
+    
+    # [STABILITY FIX] Pin exact versions to prevent RunPod template clashes
+    # 1. Force matching torch/torchaudio (vLLM downgrades torch to 2.3.0 but leaves torchaudio at 2.4.0 causing C++ crashes)
+    # 2. Pin transformers < 4.44 to prevent LogitsWarper import error in vLLM/lm-format-enforcer
+    pip install -q torch==2.3.0 torchvision==0.18.0 torchaudio==2.3.0 --index-url https://download.pytorch.org/whl/cu121
+    pip install -q "transformers==4.43.3"
+    pip install -q vllm==0.5.4
+
     pip install -q -r "$PROJECT_DIR/orchestrator/requirements.txt"
     pip install -q -r "$PROJECT_DIR/tts-server/requirements.txt"
     pip install -q -r "$PROJECT_DIR/stt-server/requirements.txt"
-    pip install -q vllm
 
     log_success "All dependencies installed!"
 }
