@@ -38,8 +38,8 @@ VAD_MIN_SILENCE_MS = int(os.getenv("VAD_MIN_SILENCE_MS", "300"))
 VAD_SPEECH_PAD_MS = int(os.getenv("VAD_SPEECH_PAD_MS", "100"))
 
 SAMPLE_RATE = 16000
-CHUNK_SIZE_MS = 30  # 30ms per VAD chunk
-CHUNK_SIZE_SAMPLES = int(SAMPLE_RATE * CHUNK_SIZE_MS / 1000)  # 480 samples
+CHUNK_SIZE_MS = 32  # 32ms per VAD chunk (Silero VAD requires 512 samples exactly)
+CHUNK_SIZE_SAMPLES = 512
 
 HOST = os.getenv("STT_SERVER_HOST", "0.0.0.0")
 PORT = int(os.getenv("STT_SERVER_PORT", "8001"))
@@ -109,6 +109,9 @@ class TranscriptionSession:
         self.speech_pad_chunks = int(VAD_SPEECH_PAD_MS / CHUNK_SIZE_MS)
         # Pre-speech buffer for capturing the start of speech
         self.pre_speech_buffer: deque[np.ndarray] = deque(maxlen=self.speech_pad_chunks)
+
+        # Buffer for accumulating bytes across websocket frames to ensure exact chunk size
+        self.audio_overflow = np.array([], dtype=np.float32)
 
         # Reset VAD state for this session
         vad_model.reset_states()
@@ -320,7 +323,10 @@ async def websocket_transcribe(ws: WebSocket):
                 continue
 
             # Convert raw PCM bytes to numpy array (16-bit signed int)
-            audio_data = np.frombuffer(raw_bytes, dtype=np.int16).astype(np.float32) / 32768.0
+            new_audio = np.frombuffer(raw_bytes, dtype=np.int16).astype(np.float32) / 32768.0
+            
+            # Append to overflow buffer
+            audio_data = np.concatenate([session.audio_overflow, new_audio])
 
             # Process in VAD-sized chunks
             offset = 0
@@ -372,6 +378,9 @@ async def websocket_transcribe(ws: WebSocket):
                             # Put audio back for the final transcription
                             session.audio_buffer = [audio]
                         last_partial_time = now
+            
+            # Save any remaining samples for the next frame
+            session.audio_overflow = audio_data[offset:]
 
     except WebSocketDisconnect:
         logger.info(f"[{session_id}] WebSocket disconnected")

@@ -16,9 +16,8 @@ class VaaniAudioProcessor extends AudioWorkletProcessor {
         // Ratio for resampling
         this.resampleRatio = this.targetSampleRate / this.inputSampleRate;
 
-        // Buffer for accumulating samples before sending
-        // Send every ~30ms of audio at 16kHz = 480 samples
-        this.bufferSize = 480;
+        // Send exactly 512 samples to perfectly match Silero VAD's exact requirement
+        this.bufferSize = 512;
         this.buffer = new Float32Array(this.bufferSize);
         this.bufferOffset = 0;
 
