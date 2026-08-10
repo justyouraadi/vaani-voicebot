@@ -79,7 +79,9 @@ import os
 path = os.path.join('$PROJECT_DIR', 'venv', 'lib', 'python3.11', 'site-packages', 'coqpit', 'coqpit.py')
 if os.path.exists(path):
     with open(path, 'r') as f: content = f.read()
-    content = content.replace('if issubclass(field_type, Serializable):', 'try:\n        is_ser = issubclass(field_type, Serializable)\n    except TypeError:\n        is_ser = False\n    if is_ser:')
+    content = content.replace('issubclass(type(x), Serializable)', 'safe_issubclass(type(x), Serializable)')
+    content = content.replace('issubclass(x, Serializable)', 'safe_issubclass(x, Serializable)')
+    content = content.replace('issubclass(field_type, Serializable)', 'safe_issubclass(field_type, Serializable)')
     with open(path, 'w') as f: f.write(content)
 "
 
