@@ -97,13 +97,11 @@ start_services() {
 
     echo ""
     log_info "Starting vLLM Server (port 8000)..."
-    python -m vllm.entrypoints.openai.api_server \
+    VLLM_USE_V1=0 python -m vllm.entrypoints.openai.api_server \
         --host 0.0.0.0 \
         --port 8000 \
         --model Qwen/Qwen2.5-7B-Instruct \
-        --dtype bfloat16 \
-        --enforce-eager \
-        --gpu-memory-utilization 0.50 \
+        --gpu-memory-utilization 0.60 \
         --max-model-len 8128 &
     VLLM_PID=$!
     
