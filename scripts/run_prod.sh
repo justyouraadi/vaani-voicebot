@@ -74,12 +74,15 @@ install_deps() {
 
     # [PYTHON 3.11 FIX] Patch coqpit's broken checks for Python 3.11 Typing features
     python3 -c "
-import os, re
+import os
 path = '/workspace/venv/lib/python3.11/site-packages/coqpit/coqpit.py'
 if os.path.exists(path):
     with open(path, 'r') as f: content = f.read()
     
-    # 1. Define safe_issubclass if it doesn't exist
+    # 1. Fix missing quotes around UnionType which causes NameError
+    content = content.replace('getattr(types, UnionType, None)', 'getattr(types, \"UnionType\", None)')
+    
+    # 2. Inject safe_issubclass if missing
     if 'def safe_issubclass' not in content:
         safe_func = '''
 def safe_issubclass(cls, classinfo) -> bool:
@@ -90,10 +93,10 @@ def safe_issubclass(cls, classinfo) -> bool:
 '''
         content = safe_func + content
 
-    # 2. Replace dangerous issubclass calls with safe_issubclass
-    content = re.sub(r'(?<!safe_)issubclass\(type\(x\), Serializable\)', 'safe_issubclass(type(x), Serializable)', content)
-    content = re.sub(r'(?<!safe_)issubclass\(x, Serializable\)', 'safe_issubclass(x, Serializable)', content)
-    content = re.sub(r'(?<!safe_)issubclass\(base_type, Serializable\)', 'safe_issubclass(base_type, Serializable)', content)
+    # 3. Replace dangerous issubclass calls
+    content = content.replace('issubclass(type(x), Serializable)', 'safe_issubclass(type(x), Serializable)')
+    content = content.replace('issubclass(x, Serializable)', 'safe_issubclass(x, Serializable)')
+    content = content.replace('issubclass(base_type, Serializable)', 'safe_issubclass(base_type, Serializable)')
     content = content.replace('safe_safe_issubclass', 'safe_issubclass')
     
     with open(path, 'w') as f: f.write(content)
