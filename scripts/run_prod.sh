@@ -74,24 +74,27 @@ install_deps() {
 
     # [PYTHON 3.11 FIX] Patch coqpit's broken checks for Python 3.11 Typing features
     python3 -c "
-import os
+import os, re
 path = '/workspace/venv/lib/python3.11/site-packages/coqpit/coqpit.py'
 if os.path.exists(path):
     with open(path, 'r') as f: content = f.read()
     
+    # 0. Self-healing: Strip out any existing/corrupted safe_issubclass definitions
+    content = re.sub(r'def safe_issubclass\(cls, classinfo\).*?return False\s*', '', content, flags=re.DOTALL)
+    content = content.replace('safe_issubclass', 'issubclass')
+    
     # 1. Fix missing quotes around UnionType which causes NameError
     content = content.replace('getattr(types, UnionType, None)', 'getattr(types, \"UnionType\", None)')
     
-    # 2. Inject safe_issubclass at end of file if missing
-    if 'def safe_issubclass' not in content:
-        safe_func = '''
+    # 2. Inject safe_issubclass cleanly at the VERY END of the file
+    safe_func = '''\n
 def safe_issubclass(cls, classinfo) -> bool:
     try:
         return issubclass(cls, classinfo)
     except TypeError:
         return False
 '''
-        content = content + safe_func
+    content = content + safe_func
 
     # 3. Replace dangerous issubclass calls
     content = content.replace('issubclass(type(x), Serializable)', 'safe_issubclass(type(x), Serializable)')
