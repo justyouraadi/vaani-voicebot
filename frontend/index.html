@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="VaaniAI — Next-Gen Voice Cloning Studio">
-    <title>🎙️ VaaniAI — Voice Studio</title>
+    <meta name="description" content="VaaniAI — Real-Time Gemini Voice Agent & Voice Studio">
+    <title>🎙️ VaaniAI — Live Gemini Agent & Voice Studio</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -21,18 +21,116 @@
             <div class="logo">
                 <span class="logo-icon">🎙️</span>
                 <div class="logo-text">
-                    <h1>Vaani Studio</h1>
-                    <span class="logo-tagline">AI Voice Cloning Engine</span>
+                    <h1>Vaani AI</h1>
+                    <span class="logo-tagline">Real-Time Voice LLM Engine</span>
                 </div>
             </div>
+
+            <!-- Navigation Tabs -->
+            <nav class="nav-tabs">
+                <button class="nav-tab active" id="tabLiveAgent" data-tab="liveAgent">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"></path>
+                        <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                        <line x1="12" y1="19" x2="12" y2="22"></line>
+                    </svg>
+                    <span>Gemini Live Agent</span>
+                </button>
+                <button class="nav-tab" id="tabVoiceStudio" data-tab="voiceStudio">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
+                    </svg>
+                    <span>Voice Studio (Cloner)</span>
+                </button>
+            </nav>
+
             <div class="header-status">
                 <div class="status-indicator online"></div>
                 <span id="serverStatusText">Server Connected</span>
             </div>
         </header>
 
-        <!-- Main Workspace -->
-        <main class="workspace">
+        <!-- VIEW 1: GEMINI LIVE AGENT MODE -->
+        <main class="workspace tab-content active" id="liveAgentView">
+            <div class="live-agent-container glass-panel">
+                <!-- Top Control & Status Bar -->
+                <div class="agent-top-bar">
+                    <div class="agent-title-info">
+                        <h2>Google Gemini-Style Live Agent</h2>
+                        <p class="subtitle">Sub-300ms Duplex Streaming • Natural Hindi/Hinglish/English</p>
+                    </div>
+
+                    <div class="agent-selectors">
+                        <div class="form-group inline-group">
+                            <label for="liveVoiceSelect">Agent Voice:</label>
+                            <div class="custom-select">
+                                <select id="liveVoiceSelect">
+                                    <option value="" disabled selected>Loading voices...</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Centerpiece: Glowing Gemini Voice Orb Visualizer -->
+                <div class="orb-workspace">
+                    <div class="orb-container idle" id="geminiOrb">
+                        <div class="orb-ring ring-outer"></div>
+                        <div class="orb-ring ring-middle"></div>
+                        <div class="orb-core">
+                            <span class="orb-icon" id="orbIcon">🎙️</span>
+                        </div>
+                        <div class="orb-waves hidden" id="orbWaves">
+                            <span></span><span></span><span></span><span></span><span></span>
+                        </div>
+                    </div>
+                    
+                    <div class="orb-status-text" id="orbStatusText">Ready to Talk</div>
+                    
+                    <!-- Call Action Button -->
+                    <button class="btn btn-call-primary" id="btnLiveCall">
+                        <svg class="call-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"></path>
+                            <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                            <line x1="12" y1="19" x2="12" y2="22"></line>
+                        </svg>
+                        <span id="callBtnText">Start Live Conversation</span>
+                    </button>
+                </div>
+
+                <!-- Live Metrics Dashboard -->
+                <div class="metrics-grid">
+                    <div class="metric-card">
+                        <span class="metric-label">TTFA Latency</span>
+                        <span class="metric-value text-accent" id="metricTTFA">-- ms</span>
+                    </div>
+                    <div class="metric-card">
+                        <span class="metric-label">Total Duration</span>
+                        <span class="metric-value" id="metricDuration">0.0s</span>
+                    </div>
+                    <div class="metric-card">
+                        <span class="metric-label">Barge-In Status</span>
+                        <span class="metric-value text-success" id="metricBargeIn">Active (Ready)</span>
+                    </div>
+                </div>
+
+                <!-- Live Transcription Feed -->
+                <div class="transcript-section">
+                    <div class="transcript-header">
+                        <h3>Live Conversation Stream</h3>
+                        <button class="btn-text" id="btnClearTranscript">Clear Stream</button>
+                    </div>
+                    <div class="transcript-feed" id="transcriptFeed">
+                        <div class="chat-placeholder">
+                            <p>Click <strong>"Start Live Conversation"</strong> and begin speaking. Vaani will listen, transcribe, and respond instantly with low latency.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- VIEW 2: VOICE STUDIO (CLONING LAB) -->
+        <main class="workspace tab-content hidden" id="voiceStudioView">
             <!-- Left Panel: Voice Management -->
             <section class="panel glass-panel voice-panel">
                 <div class="panel-header">
