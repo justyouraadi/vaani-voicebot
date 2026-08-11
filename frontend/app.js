@@ -24,9 +24,11 @@ const els = {
     languageSelect: document.getElementById('languageSelect'),
     emotionSelect: document.getElementById('emotionSelect'),
     speedSlider: document.getElementById('speedSlider'),
-    tempSlider: document.getElementById('tempSlider'),
+    stabilitySlider: document.getElementById('stabilitySlider'),
+    similaritySlider: document.getElementById('similaritySlider'),
     speedVal: document.getElementById('speedVal'),
-    tempVal: document.getElementById('tempVal'),
+    stabilityVal: document.getElementById('stabilityVal'),
+    similarityVal: document.getElementById('similarityVal'),
     btnGenerate: document.getElementById('btnGenerate'),
     generateBtnText: document.getElementById('generateBtnText'),
     generateBtnIcon: document.getElementById('generateBtnIcon'),
@@ -173,7 +175,21 @@ async function generateSpeech() {
     const language = els.languageSelect.value;
     const emotion = els.emotionSelect.value;
     let speed = parseFloat(els.speedSlider.value);
-    let temp = parseFloat(els.tempSlider.value);
+    
+    // Convert 0-100 sliders to neural parameters
+    const stabVal = parseInt(els.stabilitySlider.value, 10);
+    const simVal = parseInt(els.similaritySlider.value, 10);
+    
+    // Stability affects temperature, top_p, top_k
+    // 0 = highly expressive/variable, 100 = highly stable/monotone
+    const temp = 0.85 - (stabVal / 100) * 0.65;
+    const top_p = 0.95 - (stabVal / 100) * 0.45;
+    const top_k = Math.round(50 - (stabVal / 100) * 30);
+    
+    // Similarity Enhancement affects repetition and length penalties
+    // 0 = low enhancement, 100 = strict enhancement
+    const rep_pen = 2.0 + (simVal / 100) * 8.0;
+    const len_pen = 1.0 + (simVal / 100) * 1.0;
     
     if (!text) {
         alert("Please enter some text to synthesize.");
@@ -216,6 +232,10 @@ async function generateSpeech() {
                 language: language,
                 speed: speed,
                 temperature: temp,
+                top_p: top_p,
+                top_k: top_k,
+                repetition_penalty: rep_pen,
+                length_penalty: len_pen,
                 stream: false // Request a full WAV file back
             })
         });
@@ -259,28 +279,34 @@ function setupEventListeners() {
     els.btnGenerate.addEventListener('click', generateSpeech);
     
     // Sliders
-    els.speedSlider.addEventListener('input', (e) => els.speedVal.textContent = e.target.value);
-    els.tempSlider.addEventListener('input', (e) => els.tempVal.textContent = e.target.value);
+    els.speedSlider.addEventListener('input', (e) => els.speedVal.textContent = e.target.value + 'x');
+    els.stabilitySlider.addEventListener('input', (e) => els.stabilityVal.textContent = e.target.value + '%');
+    els.similaritySlider.addEventListener('input', (e) => els.similarityVal.textContent = e.target.value + '%');
     
     // Emotion Presets
     els.emotionSelect.addEventListener('change', (e) => {
         const em = e.target.value;
         if (em === 'excited') {
             els.speedSlider.value = 1.15;
-            els.tempSlider.value = 0.85;
+            els.stabilitySlider.value = 20;
+            els.similaritySlider.value = 40;
         } else if (em === 'sad') {
             els.speedSlider.value = 0.85;
-            els.tempSlider.value = 0.65;
+            els.stabilitySlider.value = 80;
+            els.similaritySlider.value = 60;
         } else if (em === 'angry') {
             els.speedSlider.value = 1.25;
-            els.tempSlider.value = 0.9;
+            els.stabilitySlider.value = 10;
+            els.similaritySlider.value = 30;
         } else {
             // Neutral
             els.speedSlider.value = 1.0;
-            els.tempSlider.value = 0.75;
+            els.stabilitySlider.value = 50;
+            els.similaritySlider.value = 50;
         }
-        els.speedVal.textContent = els.speedSlider.value;
-        els.tempVal.textContent = els.tempSlider.value;
+        els.speedVal.textContent = els.speedSlider.value + 'x';
+        els.stabilityVal.textContent = els.stabilitySlider.value + '%';
+        els.similarityVal.textContent = els.similaritySlider.value + '%';
     });
     
     // Drag & Drop

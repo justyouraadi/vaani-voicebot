@@ -122,6 +122,10 @@ class SynthesizeRequest(BaseModel):
     voice: Optional[str] = None  # Override reference voice
     speed: float = 1.0
     temperature: float = 0.75 # Variance / expression intensity
+    top_p: float = 0.85
+    top_k: int = 50
+    repetition_penalty: float = 5.0
+    length_penalty: float = 1.0
     stream: bool = True  # Enable streaming by default
 
 
@@ -299,7 +303,7 @@ async def synthesize(request: SynthesizeRequest):
 
     if request.stream:
         return StreamingResponse(
-            _stream_synthesis(request.text, request.language, current_gpt_cond, current_speaker_emb, request.speed, request.temperature),
+            _stream_synthesis(request.text, request.language, current_gpt_cond, current_speaker_emb, request.speed, request.temperature, request.top_p, request.top_k, request.repetition_penalty, request.length_penalty),
             media_type="audio/pcm",
             headers={
                 "X-Sample-Rate": str(OUTPUT_SAMPLE_RATE),
@@ -309,7 +313,7 @@ async def synthesize(request: SynthesizeRequest):
             },
         )
     else:
-        return await _full_synthesis(request.text, request.language, current_gpt_cond, current_speaker_emb, request.speed, request.temperature)
+        return await _full_synthesis(request.text, request.language, current_gpt_cond, current_speaker_emb, request.speed, request.temperature, request.top_p, request.top_k, request.repetition_penalty, request.length_penalty)
 
 
 async def _stream_synthesis(
@@ -319,6 +323,10 @@ async def _stream_synthesis(
     speaker_emb: Optional[torch.Tensor],
     speed: float,
     temperature: float,
+    top_p: float,
+    top_k: int,
+    repetition_penalty: float,
+    length_penalty: float,
 ):
     """
     Generator that yields audio chunks as XTTS v2 generates them.
@@ -339,6 +347,10 @@ async def _stream_synthesis(
                 speaker_emb,
                 speed=speed,
                 temperature=temperature,
+                top_p=top_p,
+                top_k=top_k,
+                repetition_penalty=repetition_penalty,
+                length_penalty=length_penalty,
                 enable_text_splitting=True,
             )
         else:
@@ -351,6 +363,10 @@ async def _stream_synthesis(
                 speaker_embedding=None,
                 speed=speed,
                 temperature=temperature,
+                top_p=top_p,
+                top_k=top_k,
+                repetition_penalty=repetition_penalty,
+                length_penalty=length_penalty,
             )
             audio = result["wav"]
             audio_np = audio.cpu().numpy() if isinstance(audio, torch.Tensor) else np.array(audio)
@@ -398,6 +414,10 @@ async def _full_synthesis(
     speaker_emb: Optional[torch.Tensor],
     speed: float,
     temperature: float,
+    top_p: float,
+    top_k: int,
+    repetition_penalty: float,
+    length_penalty: float,
 ):
     """Full (non-streaming) synthesis returning a complete WAV file."""
     start_time = time.perf_counter()
@@ -410,9 +430,13 @@ async def _full_synthesis(
             speaker_embedding=speaker_emb,
             speed=speed,
             temperature=temperature,
+            top_p=top_p,
+            top_k=top_k,
+            repetition_penalty=repetition_penalty,
+            length_penalty=length_penalty,
         )
     else:
-        result = tts_model.inference(text, language, speed=speed, temperature=temperature)
+        result = tts_model.inference(text, language, speed=speed, temperature=temperature, top_p=top_p, top_k=top_k, repetition_penalty=repetition_penalty, length_penalty=length_penalty)
 
     audio = result["wav"]
     if isinstance(audio, torch.Tensor):
