@@ -283,10 +283,13 @@ async def synthesize(request: SynthesizeRequest):
     if not request.text.strip():
         raise HTTPException(status_code=400, detail="Text cannot be empty")
 
-    logger.info(
-        f"Synthesize request: \"{request.text[:80]}{'...' if len(request.text) > 80 else ''}\" "
-        f"(lang={request.language}, stream={request.stream})"
-    )
+    # Auto-detect script and align language code for XTTS v2 phoneme clarity
+    # Devanagari range: \u0900-\u097F
+    detected_lang = request.language
+    if any('\u0900' <= char <= '\u097f' for char in request.text):
+        detected_lang = "hi"
+    elif any(char.isalpha() for char in request.text) and not any(ord(c) > 127 for c in request.text if c.isalpha()):
+        detected_lang = "en"
 
     # Resolve voice embeddings
     current_gpt_cond = gpt_cond_latent
@@ -301,9 +304,14 @@ async def synthesize(request: SynthesizeRequest):
         else:
             logger.warning(f"Requested voice not found: {request.voice}, using default")
 
+    logger.info(
+        f"Synthesize request: \"{request.text[:80]}{'...' if len(request.text) > 80 else ''}\" "
+        f"(requested_lang={request.language}, auto_lang={detected_lang}, stream={request.stream})"
+    )
+
     if request.stream:
         return StreamingResponse(
-            _stream_synthesis(request.text, request.language, current_gpt_cond, current_speaker_emb, request.speed, request.temperature, request.top_p, request.top_k, request.repetition_penalty, request.length_penalty),
+            _stream_synthesis(request.text, detected_lang, current_gpt_cond, current_speaker_emb, request.speed, request.temperature, request.top_p, request.top_k, request.repetition_penalty, request.length_penalty),
             media_type="audio/pcm",
             headers={
                 "X-Sample-Rate": str(OUTPUT_SAMPLE_RATE),
@@ -313,7 +321,7 @@ async def synthesize(request: SynthesizeRequest):
             },
         )
     else:
-        return await _full_synthesis(request.text, request.language, current_gpt_cond, current_speaker_emb, request.speed, request.temperature, request.top_p, request.top_k, request.repetition_penalty, request.length_penalty)
+        return await _full_synthesis(request.text, detected_lang, current_gpt_cond, current_speaker_emb, request.speed, request.temperature, request.top_p, request.top_k, request.repetition_penalty, request.length_penalty)
 
 
 async def _stream_synthesis(

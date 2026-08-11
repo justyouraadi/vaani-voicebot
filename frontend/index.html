@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="VaaniAI — Real-Time Gemini Voice Agent & Voice Studio">
-    <title>🎙️ VaaniAI — Live Gemini Agent & Voice Studio</title>
+    <meta name="description" content="VaaniAI — Real-Time Gemini Voice Agent">
+    <title>🎙️ VaaniAI — Real-Time Gemini Voice Agent</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -22,27 +22,9 @@
                 <span class="logo-icon">🎙️</span>
                 <div class="logo-text">
                     <h1>Vaani AI</h1>
-                    <span class="logo-tagline">Real-Time Voice LLM Engine</span>
+                    <span class="logo-tagline">Real-Time Gemini Voice Agent</span>
                 </div>
             </div>
-
-            <!-- Navigation Tabs -->
-            <nav class="nav-tabs">
-                <button class="nav-tab active" id="tabLiveAgent" data-tab="liveAgent">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"></path>
-                        <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
-                        <line x1="12" y1="19" x2="12" y2="22"></line>
-                    </svg>
-                    <span>Gemini Live Agent</span>
-                </button>
-                <button class="nav-tab" id="tabVoiceStudio" data-tab="voiceStudio">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
-                    </svg>
-                    <span>Voice Studio (Cloner)</span>
-                </button>
-            </nav>
 
             <div class="header-status">
                 <div class="status-indicator online"></div>
@@ -50,25 +32,15 @@
             </div>
         </header>
 
-        <!-- VIEW 1: GEMINI LIVE AGENT MODE -->
-        <main class="workspace tab-content active" id="liveAgentView">
-            <div class="live-agent-container glass-panel">
-                <!-- Top Control & Status Bar -->
+        <!-- Main 2-Column Dashboard Workspace -->
+        <main class="workspace-grid">
+            
+            <!-- LEFT COLUMN: Gemini Voice Orb & Controls -->
+            <section class="panel glass-panel panel-left">
                 <div class="agent-top-bar">
                     <div class="agent-title-info">
                         <h2>Google Gemini-Style Live Agent</h2>
-                        <p class="subtitle">Sub-300ms Duplex Streaming • Natural Hindi/Hinglish/English</p>
-                    </div>
-
-                    <div class="agent-selectors">
-                        <div class="form-group inline-group">
-                            <label for="liveVoiceSelect">Agent Voice:</label>
-                            <div class="custom-select">
-                                <select id="liveVoiceSelect">
-                                    <option value="" disabled selected>Loading voices...</option>
-                                </select>
-                            </div>
-                        </div>
+                        <p class="subtitle">Sub-300ms Duplex Streaming • Hindi/English</p>
                     </div>
                 </div>
 
@@ -79,9 +51,6 @@
                         <div class="orb-ring ring-middle"></div>
                         <div class="orb-core">
                             <span class="orb-icon" id="orbIcon">🎙️</span>
-                        </div>
-                        <div class="orb-waves hidden" id="orbWaves">
-                            <span></span><span></span><span></span><span></span><span></span>
                         </div>
                     </div>
                     
@@ -98,6 +67,16 @@
                     </button>
                 </div>
 
+                <!-- Voice Selector Dropdown -->
+                <div class="form-group inline-select-group">
+                    <label for="liveVoiceSelect">Cloned Reference Voice:</label>
+                    <div class="custom-select">
+                        <select id="liveVoiceSelect">
+                            <option value="" disabled selected>Loading voices...</option>
+                        </select>
+                    </div>
+                </div>
+
                 <!-- Live Metrics Dashboard -->
                 <div class="metrics-grid">
                     <div class="metric-card">
@@ -105,170 +84,32 @@
                         <span class="metric-value text-accent" id="metricTTFA">-- ms</span>
                     </div>
                     <div class="metric-card">
-                        <span class="metric-label">Total Duration</span>
+                        <span class="metric-label">Call Duration</span>
                         <span class="metric-value" id="metricDuration">0.0s</span>
                     </div>
                     <div class="metric-card">
                         <span class="metric-label">Barge-In Status</span>
-                        <span class="metric-value text-success" id="metricBargeIn">Active (Ready)</span>
+                        <span class="metric-value text-success" id="metricBargeIn">Active</span>
                     </div>
                 </div>
+            </section>
 
-                <!-- Live Transcription Feed -->
-                <div class="transcript-section">
-                    <div class="transcript-header">
-                        <h3>Live Conversation Stream</h3>
-                        <button class="btn-text" id="btnClearTranscript">Clear Stream</button>
-                    </div>
+            <!-- RIGHT COLUMN: Live Conversation Stream -->
+            <section class="panel glass-panel panel-right">
+                <div class="panel-header">
+                    <h2>Live Conversation Stream</h2>
+                    <button class="btn-text" id="btnClearTranscript">Clear Stream</button>
+                </div>
+
+                <div class="transcript-feed-container">
                     <div class="transcript-feed" id="transcriptFeed">
                         <div class="chat-placeholder">
-                            <p>Click <strong>"Start Live Conversation"</strong> and begin speaking. Vaani will listen, transcribe, and respond instantly with low latency.</p>
+                            <p>Click <strong>"Start Live Conversation"</strong> and speak into your microphone. Your transcript and Vaani's real-time voice response will stream here live.</p>
                         </div>
-                    </div>
-                </div>
-            </div>
-        </main>
-
-        <!-- VIEW 2: VOICE STUDIO (CLONING LAB) -->
-        <main class="workspace tab-content hidden" id="voiceStudioView">
-            <!-- Left Panel: Voice Management -->
-            <section class="panel glass-panel voice-panel">
-                <div class="panel-header">
-                    <h2>Voice Library</h2>
-                    <span class="badge" id="voiceCount">0 Voices</span>
-                </div>
-                
-                <div class="voice-list-container">
-                    <ul class="voice-list" id="voiceList">
-                        <div class="loading-spinner small"></div>
-                    </ul>
-                </div>
-
-                <div class="upload-section">
-                    <h3>Create New Clone</h3>
-                    <div class="upload-dropzone" id="dropzone">
-                        <svg class="upload-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                            <polyline points="17 8 12 3 7 8"></polyline>
-                            <line x1="12" y1="3" x2="12" y2="15"></line>
-                        </svg>
-                        <p>Drop audio file or <span class="text-highlight">browse</span></p>
-                        <span class="file-hint">Supports .mp3, .wav (Max 10s recommended)</span>
-                        <input type="file" id="fileInput" accept="audio/*" hidden>
-                    </div>
-                    
-                    <div class="divider"><span>OR</span></div>
-                    
-                    <button class="btn btn-secondary btn-full" id="btnRecord">
-                        <span class="record-dot" id="recordDot"></span>
-                        <span id="recordText">Record Live Audio</span>
-                    </button>
-                    
-                    <div id="uploadProgress" class="progress-bar-container hidden">
-                        <div class="progress-bar" id="progressBar"></div>
-                        <span class="progress-text" id="progressText">Processing...</span>
                     </div>
                 </div>
             </section>
 
-            <!-- Right Panel: Synthesis -->
-            <section class="panel glass-panel synth-panel">
-                <div class="panel-header">
-                    <h2>Synthesis Lab</h2>
-                </div>
-                
-                <div class="synth-form">
-                    <div class="form-group">
-                        <label for="textInput">What should the voice say?</label>
-                        <textarea id="textInput" placeholder="Type your script here... XTTS will synthesize it with perfect emotion and cadence." rows="6"></textarea>
-                    </div>
-
-                    <div class="form-row">
-                        <div class="form-group flex-1">
-                            <label for="voiceSelect">Select Voice</label>
-                            <div class="custom-select">
-                                <select id="voiceSelect">
-                                    <option value="" disabled selected>Loading voices...</option>
-                                </select>
-                            </div>
-                        </div>
-                        <div class="form-group flex-1">
-                            <label for="languageSelect">Language</label>
-                            <div class="custom-select">
-                                <select id="languageSelect">
-                                    <option value="hi" selected>Hindi / Hinglish</option>
-                                    <option value="en">English</option>
-                                </select>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="form-row">
-                        <div class="form-group flex-1">
-                            <label for="emotionSelect">Emotion Preset</label>
-                            <div class="custom-select">
-                                <select id="emotionSelect">
-                                    <option value="neutral" selected>Neutral</option>
-                                    <option value="excited">Excited / High Energy</option>
-                                    <option value="sad">Sad / Serious</option>
-                                    <option value="angry">Angry / Aggressive</option>
-                                </select>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="form-row advanced-controls" style="flex-wrap: wrap;">
-                        <div class="form-group flex-1" style="min-width: 45%;">
-                            <div class="label-row">
-                                <label for="stabilitySlider">Stability</label>
-                                <span class="slider-val" id="stabilityVal">50%</span>
-                            </div>
-                            <input type="range" id="stabilitySlider" min="0" max="100" step="1" value="50">
-                            <span class="file-hint">More variable &nbsp; ↔ &nbsp; More stable</span>
-                        </div>
-                        <div class="form-group flex-1" style="min-width: 45%;">
-                            <div class="label-row">
-                                <label for="similaritySlider">Similarity Enhancement</label>
-                                <span class="slider-val" id="similarityVal">50%</span>
-                            </div>
-                            <input type="range" id="similaritySlider" min="0" max="100" step="1" value="50">
-                            <span class="file-hint">Low (blurry) &nbsp; ↔ &nbsp; High (exact)</span>
-                        </div>
-                        <div class="form-group flex-1" style="min-width: 45%; margin-top: 1rem;">
-                            <div class="label-row">
-                                <label for="speedSlider">Style / Speed</label>
-                                <span class="slider-val" id="speedVal">1.0x</span>
-                            </div>
-                            <input type="range" id="speedSlider" min="0.7" max="1.5" step="0.05" value="1.0">
-                        </div>
-                    </div>
-
-                    <button class="btn btn-primary btn-generate" id="btnGenerate">
-                        <span class="btn-text" id="generateBtnText">Generate Speech</span>
-                        <svg class="play-icon" id="generateBtnIcon" width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-                            <polygon points="5 3 19 12 5 21 5 3"></polygon>
-                        </svg>
-                        <div class="loading-spinner hidden" id="generateSpinner"></div>
-                    </button>
-                </div>
-
-                <div class="audio-result-container hidden" id="resultContainer">
-                    <div class="result-header">
-                        <h3>Generated Audio</h3>
-                        <span class="generation-time" id="genTime"></span>
-                    </div>
-                    <div class="custom-player">
-                        <audio id="audioPlayer" controls></audio>
-                        <a href="#" id="downloadBtn" class="btn-icon" download="vaani_synth.wav" title="Download Audio">
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                                <polyline points="7 10 12 15 17 10"></polyline>
-                                <line x1="12" y1="15" x2="12" y2="3"></line>
-                            </svg>
-                        </a>
-                    </div>
-                </div>
-            </section>
         </main>
     </div>
 

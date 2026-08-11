@@ -1,5 +1,5 @@
 /**
- * 🎙️ VaaniAI — Gemini Live Agent & Voice Studio Engine
+ * 🎙️ VaaniAI — Real-Time Gemini Live Agent Engine
  */
 
 const API_BASE = window.location.origin + '/api';
@@ -8,12 +8,6 @@ const API_BASE = window.location.origin + '/api';
 const els = {
     serverStatus: document.getElementById('serverStatusText'),
     
-    // Navigation Tabs
-    tabLiveAgent: document.getElementById('tabLiveAgent'),
-    tabVoiceStudio: document.getElementById('tabVoiceStudio'),
-    liveAgentView: document.getElementById('liveAgentView'),
-    voiceStudioView: document.getElementById('voiceStudioView'),
-
     // Gemini Live Agent Elements
     liveVoiceSelect: document.getElementById('liveVoiceSelect'),
     geminiOrb: document.getElementById('geminiOrb'),
@@ -26,43 +20,7 @@ const els = {
     metricBargeIn: document.getElementById('metricBargeIn'),
     transcriptFeed: document.getElementById('transcriptFeed'),
     btnClearTranscript: document.getElementById('btnClearTranscript'),
-
-    // Voice Studio Elements
-    voiceList: document.getElementById('voiceList'),
-    voiceCount: document.getElementById('voiceCount'),
-    voiceSelect: document.getElementById('voiceSelect'),
-    dropzone: document.getElementById('dropzone'),
-    fileInput: document.getElementById('fileInput'),
-    btnRecord: document.getElementById('btnRecord'),
-    recordText: document.getElementById('recordText'),
-    uploadProgress: document.getElementById('uploadProgress'),
-    
-    // Synthesis Form
-    textInput: document.getElementById('textInput'),
-    languageSelect: document.getElementById('languageSelect'),
-    emotionSelect: document.getElementById('emotionSelect'),
-    speedSlider: document.getElementById('speedSlider'),
-    stabilitySlider: document.getElementById('stabilitySlider'),
-    similaritySlider: document.getElementById('similaritySlider'),
-    speedVal: document.getElementById('speedVal'),
-    stabilityVal: document.getElementById('stabilityVal'),
-    similarityVal: document.getElementById('similarityVal'),
-    btnGenerate: document.getElementById('btnGenerate'),
-    generateBtnText: document.getElementById('generateBtnText'),
-    generateBtnIcon: document.getElementById('generateBtnIcon'),
-    generateSpinner: document.getElementById('generateSpinner'),
-    
-    // Result
-    resultContainer: document.getElementById('resultContainer'),
-    genTime: document.getElementById('genTime'),
-    audioPlayer: document.getElementById('audioPlayer'),
-    downloadBtn: document.getElementById('downloadBtn')
 };
-
-// State Variables
-let isRecording = false;
-let mediaRecorder = null;
-let audioChunks = [];
 
 // Gemini Live Call State
 let isLiveCallActive = false;
@@ -80,30 +38,8 @@ let activeAiBubble = null;
 
 // Initialize
 async function init() {
-    setupTabNavigation();
     await fetchVoices();
-    setupStudioEventListeners();
     setupLiveAgentEventListeners();
-}
-
-// Tab Navigation
-function setupTabNavigation() {
-    els.tabLiveAgent.addEventListener('click', () => switchTab('liveAgent'));
-    els.tabVoiceStudio.addEventListener('click', () => switchTab('voiceStudio'));
-}
-
-function switchTab(tabName) {
-    if (tabName === 'liveAgent') {
-        els.tabLiveAgent.classList.add('active');
-        els.tabVoiceStudio.classList.remove('active');
-        els.liveAgentView.classList.remove('hidden');
-        els.voiceStudioView.classList.add('hidden');
-    } else {
-        els.tabVoiceStudio.classList.add('active');
-        els.tabLiveAgent.classList.remove('active');
-        els.voiceStudioView.classList.remove('hidden');
-        els.liveAgentView.classList.add('hidden');
-    }
 }
 
 // Fetch Voices from Backend
@@ -115,46 +51,14 @@ async function fetchVoices() {
         const data = await response.json();
         const voices = data.voices || [];
         
-        els.voiceCount.textContent = `${voices.length} Voices`;
-        
-        // Clear lists
-        els.voiceList.innerHTML = '';
-        els.voiceSelect.innerHTML = '';
         els.liveVoiceSelect.innerHTML = '';
         
         if (voices.length === 0) {
-            els.voiceList.innerHTML = '<li class="voice-item"><div class="voice-name">No voices found</div></li>';
-            els.voiceSelect.innerHTML = '<option value="" disabled selected>No voices available</option>';
             els.liveVoiceSelect.innerHTML = '<option value="" disabled selected>No voices available</option>';
             return;
         }
 
         voices.forEach((voice, index) => {
-            // Add to Voice Studio List
-            const li = document.createElement('li');
-            li.className = `voice-item ${index === 0 ? 'active' : ''}`;
-            const sizeKb = (voice.size_bytes / 1024).toFixed(1);
-            li.innerHTML = `
-                <div class="voice-info" style="flex: 1;" onclick="selectVoice(this, '${voice.filename}')">
-                    <span class="voice-name">${voice.name}</span>
-                    <span class="voice-size">${sizeKb} KB</span>
-                </div>
-                <button class="btn-delete" onclick="deleteVoice('${voice.filename}')" title="Delete Voice">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                    </svg>
-                </button>
-            `;
-            els.voiceList.appendChild(li);
-            
-            // Add to Studio Dropdown
-            const option = document.createElement('option');
-            option.value = voice.filename;
-            option.textContent = voice.name;
-            if (index === 0) option.selected = true;
-            els.voiceSelect.appendChild(option);
-
-            // Add to Live Agent Dropdown
             const liveOpt = document.createElement('option');
             liveOpt.value = voice.filename;
             liveOpt.textContent = voice.name;
@@ -164,35 +68,10 @@ async function fetchVoices() {
         
     } catch (error) {
         console.error('Error fetching voices:', error);
-        els.voiceList.innerHTML = '<li class="voice-item"><div class="voice-name text-danger">Error loading voices</div></li>';
         els.serverStatus.textContent = 'Disconnected';
         els.serverStatus.previousElementSibling.classList.remove('online');
     }
 }
-
-// Select Voice in Library
-window.selectVoice = function(element, filename) {
-    document.querySelectorAll('.voice-item').forEach(el => el.classList.remove('active'));
-    element.parentElement.classList.add('active');
-    els.voiceSelect.value = filename;
-    els.liveVoiceSelect.value = filename;
-};
-
-// Delete Voice
-window.deleteVoice = async function(filename) {
-    if (!confirm(`Are you sure you want to delete ${filename}?`)) return;
-    
-    try {
-        const response = await fetch(`${API_BASE}/voices/${filename}`, { method: 'DELETE' });
-        if (!response.ok) {
-            const err = await response.json();
-            throw new Error(err.detail || 'Delete failed');
-        }
-        await fetchVoices();
-    } catch (error) {
-        alert('Error deleting voice: ' + error.message);
-    }
-};
 
 // ─────────────────────────────────────────────
 // 🎙️ GEMINI LIVE AGENT WEBSOCKET ENGINE
@@ -203,7 +82,7 @@ function setupLiveAgentEventListeners() {
     els.btnClearTranscript.addEventListener('click', () => {
         els.transcriptFeed.innerHTML = `
             <div class="chat-placeholder">
-                <p>Click <strong>"Start Live Conversation"</strong> and begin speaking. Vaani will listen, transcribe, and respond instantly with low latency.</p>
+                <p>Click <strong>"Start Live Conversation"</strong> and speak into your microphone. Your transcript and Vaani's real-time voice response will stream here live.</p>
             </div>`;
     });
 }
@@ -257,7 +136,7 @@ async function startLiveCall() {
             };
 
             source.connect(workletNode);
-            workletNode.connect(audioCtx.destination); // Required to keep worklet alive
+            workletNode.connect(audioCtx.destination);
 
             // Start Duration Timer
             callStartTime = Date.now();
@@ -388,7 +267,6 @@ function handleJsonMessage(msg) {
 }
 
 function appendChatBubble(sender, text) {
-    // Remove placeholder
     const placeholder = els.transcriptFeed.querySelector('.chat-placeholder');
     if (placeholder) placeholder.remove();
 
@@ -458,177 +336,6 @@ function stopAllAudioPlayback() {
     if (currentSourceNode) {
         try { currentSourceNode.stop(); } catch(e){}
         currentSourceNode = null;
-    }
-}
-
-// ─────────────────────────────────────────────
-// VOICE STUDIO (VOICE CLONER) LOGIC
-// ─────────────────────────────────────────────
-
-function setupStudioEventListeners() {
-    els.btnGenerate.addEventListener('click', generateSpeech);
-    els.speedSlider.addEventListener('input', (e) => els.speedVal.textContent = e.target.value + 'x');
-    els.stabilitySlider.addEventListener('input', (e) => els.stabilityVal.textContent = e.target.value + '%');
-    els.similaritySlider.addEventListener('input', (e) => els.similarityVal.textContent = e.target.value + '%');
-    
-    els.emotionSelect.addEventListener('change', (e) => {
-        const em = e.target.value;
-        if (em === 'excited') {
-            els.speedSlider.value = 1.15;
-            els.stabilitySlider.value = 20;
-            els.similaritySlider.value = 40;
-        } else if (em === 'sad') {
-            els.speedSlider.value = 0.85;
-            els.stabilitySlider.value = 80;
-            els.similaritySlider.value = 60;
-        } else if (em === 'angry') {
-            els.speedSlider.value = 1.25;
-            els.stabilitySlider.value = 10;
-            els.similaritySlider.value = 30;
-        } else {
-            els.speedSlider.value = 1.0;
-            els.stabilitySlider.value = 50;
-            els.similaritySlider.value = 50;
-        }
-        els.speedVal.textContent = els.speedSlider.value + 'x';
-        els.stabilityVal.textContent = els.stabilitySlider.value + '%';
-        els.similarityVal.textContent = els.similaritySlider.value + '%';
-    });
-    
-    els.dropzone.addEventListener('click', () => els.fileInput.click());
-    els.dropzone.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        els.dropzone.classList.add('dragover');
-    });
-    els.dropzone.addEventListener('dragleave', () => els.dropzone.classList.remove('dragover'));
-    els.dropzone.addEventListener('drop', (e) => {
-        e.preventDefault();
-        els.dropzone.classList.remove('dragover');
-        if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-            uploadVoice(e.dataTransfer.files[0]);
-        }
-    });
-    els.fileInput.addEventListener('change', (e) => {
-        if (e.target.files && e.target.files.length > 0) {
-            uploadVoice(e.target.files[0]);
-        }
-    });
-    
-    els.btnRecord.addEventListener('click', toggleRecording);
-}
-
-async function uploadVoice(file) {
-    if (!file) return;
-    const formData = new FormData();
-    const filename = file.name || `recording_${Date.now()}.webm`;
-    formData.append('file', file, filename);
-    
-    els.uploadProgress.classList.remove('hidden');
-    try {
-        const response = await fetch(`${API_BASE}/voices`, { method: 'POST', body: formData });
-        if (!response.ok) {
-            const err = await response.json();
-            throw new Error(err.detail || 'Upload failed');
-        }
-        await fetchVoices();
-    } catch (error) {
-        alert('Error uploading voice: ' + error.message);
-    } finally {
-        els.uploadProgress.classList.add('hidden');
-    }
-}
-
-async function generateSpeech() {
-    let text = els.textInput.value.trim();
-    const voice = els.voiceSelect.value;
-    const language = els.languageSelect.value;
-    const emotion = els.emotionSelect.value;
-    let speed = parseFloat(els.speedSlider.value);
-    
-    const stabVal = parseInt(els.stabilitySlider.value, 10);
-    const simVal = parseInt(els.similaritySlider.value, 10);
-    
-    const temp = 0.85 - (stabVal / 100) * 0.65;
-    const top_p = 0.95 - (stabVal / 100) * 0.45;
-    const top_k = Math.round(50 - (stabVal / 100) * 30);
-    const rep_pen = 2.0 + (simVal / 100) * 8.0;
-    const len_pen = 1.0 + (simVal / 100) * 1.0;
-    
-    if (!text) { alert("Please enter text."); return; }
-    if (!voice) { alert("Please select a voice."); return; }
-    
-    if (emotion === 'excited' && !text.endsWith('!')) text += '!';
-    else if (emotion === 'angry') text = text.toUpperCase() + '!!';
-    else if (emotion === 'sad' && !text.endsWith('.')) text += '...';
-    
-    els.btnGenerate.disabled = true;
-    els.generateBtnText.textContent = "Synthesizing...";
-    els.generateBtnIcon.classList.add('hidden');
-    els.generateSpinner.classList.remove('hidden');
-    els.resultContainer.classList.add('hidden');
-    
-    const startTime = performance.now();
-    
-    try {
-        const response = await fetch(`${API_BASE}/synthesize`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                text, voice, language, speed, temperature: temp, top_p, top_k,
-                repetition_penalty: rep_pen, length_penalty: len_pen, stream: false
-            })
-        });
-        
-        if (!response.ok) throw new Error('Synthesis failed');
-        
-        const audioBlob = await response.blob();
-        const audioUrl = URL.createObjectURL(audioBlob);
-        
-        els.audioPlayer.src = audioUrl;
-        els.downloadBtn.href = audioUrl;
-        els.downloadBtn.download = `vaani_${voice}_${Date.now()}.wav`;
-        
-        const timeTaken = ((performance.now() - startTime) / 1000).toFixed(1);
-        els.genTime.textContent = `${timeTaken}s generation time`;
-        els.resultContainer.classList.remove('hidden');
-        els.audioPlayer.play();
-        
-    } catch (error) {
-        alert("Error generating speech: " + error.message);
-    } finally {
-        els.btnGenerate.disabled = false;
-        els.generateBtnText.textContent = "Generate Speech";
-        els.generateBtnIcon.classList.remove('hidden');
-        els.generateSpinner.classList.add('hidden');
-    }
-}
-
-async function toggleRecording() {
-    if (!isRecording) {
-        try {
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            mediaRecorder = new MediaRecorder(stream);
-            audioChunks = [];
-            
-            mediaRecorder.ondataavailable = e => { if (e.data.size > 0) audioChunks.push(e.data); };
-            mediaRecorder.onstop = () => {
-                const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
-                uploadVoice(audioBlob);
-                stream.getTracks().forEach(track => track.stop());
-            };
-            
-            mediaRecorder.start();
-            isRecording = true;
-            els.btnRecord.classList.add('recording');
-            els.recordText.textContent = "Stop Recording";
-        } catch (err) {
-            alert("Microphone error: " + err.message);
-        }
-    } else {
-        if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
-        isRecording = false;
-        els.btnRecord.classList.remove('recording');
-        els.recordText.textContent = "Record Live Audio";
     }
 }
 
