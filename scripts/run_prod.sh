@@ -82,7 +82,7 @@ if os.path.exists(path):
     # 1. Fix missing quotes around UnionType which causes NameError
     content = content.replace('getattr(types, UnionType, None)', 'getattr(types, \"UnionType\", None)')
     
-    # 2. Inject safe_issubclass if missing
+    # 2. Inject safe_issubclass at end of file if missing
     if 'def safe_issubclass' not in content:
         safe_func = '''
 def safe_issubclass(cls, classinfo) -> bool:
@@ -91,7 +91,7 @@ def safe_issubclass(cls, classinfo) -> bool:
     except TypeError:
         return False
 '''
-        content = safe_func + content
+        content = content + safe_func
 
     # 3. Replace dangerous issubclass calls
     content = content.replace('issubclass(type(x), Serializable)', 'safe_issubclass(type(x), Serializable)')
