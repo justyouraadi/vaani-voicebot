@@ -70,13 +70,15 @@ class SentenceChunker:
             should_flush = False
             reason = ""
 
-            # Rule 1: Sentence-ending punctuation with minimum words
+            # Rule 1: Sentence-ending punctuation with minimum 3 words
+            # (XTTS cannot synthesize 1-2 word fragments — produces chirping)
             if any(current_text.endswith(p) for p in HINDI_SENTENCE_ENDERS):
-                if word_count >= 1:  # Always flush on sentence end
+                if word_count >= 3:
                     should_flush = True
                     reason = "sentence_end"
 
             # Rule 2: Clause punctuation (comma, semicolon) with minimum words
+            # (Need enough phonetic context for clean XTTS synthesis)
             elif any(current_text.endswith(p) for p in FLUSH_PUNCTUATION):
                 if word_count >= self.min_words:
                     should_flush = True

@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     vllm_base_url: str = Field(default="http://localhost:8000/v1", alias="VLLM_BASE_URL")
     vllm_model: str = Field(default="Qwen/Qwen2.5-7B-Instruct", alias="VLLM_MODEL")
     vllm_api_key: str = Field(default="EMPTY", alias="VLLM_API_KEY")
-    llm_max_tokens: int = Field(default=256, alias="LLM_MAX_TOKENS")
+    llm_max_tokens: int = Field(default=100, alias="LLM_MAX_TOKENS")
     llm_temperature: float = Field(default=0.7, alias="LLM_TEMPERATURE")
 
     # ── STT Server (The Ears) ──
@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     vad_min_silence_ms: int = Field(default=300, alias="VAD_MIN_SILENCE_MS")
 
     # ── Pipeline ──
-    sentence_chunk_min_words: int = Field(default=3, alias="SENTENCE_CHUNK_MIN_WORDS")
+    sentence_chunk_min_words: int = Field(default=6, alias="SENTENCE_CHUNK_MIN_WORDS")
     sentence_chunk_max_wait_ms: int = Field(default=500, alias="SENTENCE_CHUNK_MAX_WAIT_MS")
     filler_words: str = Field(default="Ji,Hmm,Achha,Dekhiye,Bilkul", alias="FILLER_WORDS")
 

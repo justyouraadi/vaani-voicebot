@@ -121,10 +121,10 @@ class SynthesizeRequest(BaseModel):
     language: str = XTTS_LANGUAGE
     voice: Optional[str] = None  # Override reference voice
     speed: float = 1.0
-    temperature: float = 0.75 # Variance / expression intensity
+    temperature: float = 0.65  # Lower = more stable, less chirping
     top_p: float = 0.85
     top_k: int = 50
-    repetition_penalty: float = 5.0
+    repetition_penalty: float = 2.0  # Lower = fewer skipped phonemes in Hindi
     length_penalty: float = 1.0
     stream: bool = True  # Enable streaming by default
 
@@ -347,6 +347,27 @@ async def _stream_synthesis(
 
     try:
         if gpt_cond is not None and speaker_emb is not None:
+            # For short text (<10 words), use full inference for cleaner output
+            word_count = len(text.split())
+            if word_count < 10:
+                logger.info(f"Short text ({word_count} words), using full inference for quality")
+                result = tts_model.inference(
+                    text,
+                    language,
+                    gpt_cond_latent=gpt_cond,
+                    speaker_embedding=speaker_emb,
+                    speed=speed,
+                    temperature=temperature,
+                    top_p=top_p,
+                    top_k=top_k,
+                    repetition_penalty=repetition_penalty,
+                    length_penalty=length_penalty,
+                )
+                audio = result["wav"]
+                audio_np = audio.cpu().numpy() if isinstance(audio, torch.Tensor) else np.array(audio)
+                yield numpy_to_pcm_bytes(audio_np)
+                return
+
             # Streaming inference with voice cloning
             chunks = tts_model.inference_stream(
                 text,
@@ -359,7 +380,7 @@ async def _stream_synthesis(
                 top_k=top_k,
                 repetition_penalty=repetition_penalty,
                 length_penalty=length_penalty,
-                enable_text_splitting=True,
+                enable_text_splitting=False,  # We already chunk upstream — don't double-split
             )
         else:
             # Fallback: full inference without cloning (no streaming possible without embeddings)
