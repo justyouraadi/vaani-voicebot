@@ -68,6 +68,7 @@ class TTSService:
                     logger.error(f"TTS error {response.status_code}: {body.decode()}")
                     return
 
+                byte_buffer = bytearray()
                 async for chunk in response.aiter_bytes(chunk_size=4096):
                     # Check for cancellation (barge-in)
                     if self._cancel_event and self._cancel_event.is_set():
@@ -75,14 +76,23 @@ class TTSService:
                         break
 
                     if chunk:
-                        chunk_count += 1
-                        total_bytes += len(chunk)
+                        byte_buffer.extend(chunk)
+                        even_len = (len(byte_buffer) // 2) * 2
+                        if even_len > 0:
+                            to_send = bytes(byte_buffer[:even_len])
+                            byte_buffer = byte_buffer[even_len:]
+                            chunk_count += 1
+                            total_bytes += len(to_send)
 
-                        if first_chunk_time is None:
-                            first_chunk_time = (time.perf_counter() - start_time) * 1000
-                            logger.info(f"TTS first chunk in {first_chunk_time:.0f}ms")
+                            if first_chunk_time is None:
+                                first_chunk_time = (time.perf_counter() - start_time) * 1000
+                                logger.info(f"TTS first chunk in {first_chunk_time:.0f}ms")
 
-                        yield chunk
+                            yield to_send
+
+                if len(byte_buffer) >= 2:
+                    even_len = (len(byte_buffer) // 2) * 2
+                    yield bytes(byte_buffer[:even_len])
 
         except httpx.ReadError:
             if self._cancel_event and self._cancel_event.is_set():

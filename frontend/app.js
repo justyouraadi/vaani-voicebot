@@ -7,8 +7,6 @@ const API_BASE = window.location.origin + '/api';
 // DOM Elements
 const els = {
     serverStatus: document.getElementById('serverStatusText'),
-    
-    // Gemini Live Agent Elements
     liveVoiceSelect: document.getElementById('liveVoiceSelect'),
     geminiOrb: document.getElementById('geminiOrb'),
     orbIcon: document.getElementById('orbIcon'),
@@ -30,11 +28,16 @@ let micStream = null;
 let workletNode = null;
 let callStartTime = null;
 let durationInterval = null;
-let audioQueue = [];
-let isPlayingAudio = false;
-let currentSourceNode = null;
-let activeAiBubbleText = null;
+
+// Audio Streaming & Web Audio Clock Scheduler
+let nextStartTime = 0;
+let activeSourceNodes = [];
+let pendingByteQueue = new Uint8Array(0);
+
+// Per-Turn Audio Accumulator (for WAV download)
+let turnInt16Samples = [];
 let activeAiBubble = null;
+let activeAiBubbleText = "";
 
 // Initialize
 async function init() {
@@ -198,6 +201,7 @@ function stopLiveCall() {
         durationInterval = null;
     }
 
+    finalizeCurrentTurnAudio();
     stopAllAudioPlayback();
     updateCallUI('idle');
 }
@@ -211,6 +215,7 @@ function updateCallUI(state) {
         els.orbIcon.textContent = "🎙️";
         els.orbStatusText.textContent = "Ready to Talk";
         els.metricBargeIn.textContent = "Active (Ready)";
+        finalizeCurrentTurnAudio();
     } else if (state === 'connecting') {
         els.btnLiveCall.classList.add('active-call');
         els.callBtnText.textContent = "End Call";
@@ -221,6 +226,7 @@ function updateCallUI(state) {
         els.callBtnText.textContent = "End Call";
         els.orbIcon.textContent = "👂";
         els.orbStatusText.textContent = "Listening to you...";
+        finalizeCurrentTurnAudio();
     } else if (state === 'thinking') {
         els.btnLiveCall.classList.add('active-call');
         els.callBtnText.textContent = "End Call";
@@ -243,9 +249,11 @@ function handleJsonMessage(msg) {
     } else if (msg.type === 'state') {
         updateCallUI(msg.state);
     } else if (msg.type === 'transcription') {
+        finalizeCurrentTurnAudio();
         appendChatBubble('user', msg.text);
         activeAiBubble = null;
         activeAiBubbleText = "";
+        turnInt16Samples = [];
     } else if (msg.type === 'ai_text') {
         if (!activeAiBubble) {
             activeAiBubble = appendChatBubble('ai', '');
@@ -261,6 +269,7 @@ function handleJsonMessage(msg) {
     } else if (msg.type === 'barge_in') {
         console.log("🛑 BARGE-IN DETECTED: Cutting audio playback immediately");
         stopAllAudioPlayback();
+        finalizeCurrentTurnAudio();
         els.metricBargeIn.textContent = "Interrupted!";
         setTimeout(() => els.metricBargeIn.textContent = "Active (Ready)", 2000);
     }
@@ -275,6 +284,7 @@ function appendChatBubble(sender, text) {
     bubble.innerHTML = `
         <span class="chat-sender">${sender === 'user' ? 'You' : 'Vaani'}</span>
         <span class="chat-text">${text}</span>
+        <div class="audio-download-slot"></div>
     `;
     els.transcriptFeed.appendChild(bubble);
     scrollTranscriptToBottom();
@@ -285,57 +295,159 @@ function scrollTranscriptToBottom() {
     els.transcriptFeed.scrollTop = els.transcriptFeed.scrollHeight;
 }
 
+// Finalize AI Audio Turn into Downloadable WAV File
+function finalizeCurrentTurnAudio() {
+    if (activeAiBubble && turnInt16Samples.length > 0) {
+        const slot = activeAiBubble.querySelector('.audio-download-slot');
+        if (slot && !slot.innerHTML) {
+            // Flatten Int16 samples
+            const totalLen = turnInt16Samples.reduce((sum, chunk) => sum + chunk.length, 0);
+            const mergedInt16 = new Int16Array(totalLen);
+            let offset = 0;
+            for (const chunk of turnInt16Samples) {
+                mergedInt16.set(chunk, offset);
+                offset += chunk.length;
+            }
+
+            const wavBlob = createWavBlob(mergedInt16, 24000);
+            const wavUrl = URL.createObjectURL(wavBlob);
+
+            slot.innerHTML = `
+                <a href="${wavUrl}" download="vaani_response_${Date.now()}.wav" class="btn-download-wav" title="Download Response Audio">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                        <polyline points="7 10 12 15 17 10"></polyline>
+                        <line x1="12" y1="15" x2="12" y2="3"></line>
+                    </svg>
+                    <span>Download Audio (WAV)</span>
+                </a>
+            `;
+        }
+    }
+    turnInt16Samples = [];
+}
+
 // ─────────────────────────────────────────────
-// Audio Chunk Playback (24kHz PCM Int16)
+// Audio Chunk Processing & Web Audio Scheduler
 // ─────────────────────────────────────────────
 
 function handleAudioChunk(arrayBuffer) {
     if (!audioCtx) return;
 
-    // Convert Int16 PCM arraybuffer to Float32 [-1, 1]
-    const int16Array = new Int16Array(arrayBuffer);
-    const float32Array = new Float32Array(int16Array.length);
+    // 1. Accumulate raw bytes into byte queue
+    const incomingBytes = new Uint8Array(arrayBuffer);
+    const newByteQueue = new Uint8Array(pendingByteQueue.length + incomingBytes.length);
+    newByteQueue.set(pendingByteQueue, 0);
+    newByteQueue.set(incomingBytes, pendingByteQueue.length);
+
+    // 2. Extract ONLY complete 2-byte (16-bit Int16) PCM samples
+    const evenByteLength = Math.floor(newByteQueue.length / 2) * 2;
+    if (evenByteLength === 0) {
+        pendingByteQueue = newByteQueue;
+        return;
+    }
+
+    const completeBytes = newByteQueue.subarray(0, evenByteLength);
+    pendingByteQueue = newByteQueue.subarray(evenByteLength); // Hold remaining odd byte
+
+    // 3. Convert Int16 PCM arraybuffer to Float32 [-1, 1]
+    const int16Array = new Int16Array(completeBytes.buffer, completeBytes.byteOffset, completeBytes.length / 2);
     
+    // Collect samples for downloadable WAV
+    turnInt16Samples.push(new Int16Array(int16Array));
+
+    const float32Array = new Float32Array(int16Array.length);
     for (let i = 0; i < int16Array.length; i++) {
         float32Array[i] = int16Array[i] / (int16Array[i] < 0 ? 32768 : 32767);
     }
 
-    // Create Audio Buffer at 24kHz (XTTS output sample rate)
-    const buffer = audioCtx.createBuffer(1, float32Array.length, 24000);
-    buffer.getChannelData(0).set(float32Array);
+    // 4. Create Audio Buffer at 24kHz (XTTS output sample rate)
+    const audioBuffer = audioCtx.createBuffer(1, float32Array.length, 24000);
+    audioBuffer.getChannelData(0).set(float32Array);
 
-    audioQueue.push(buffer);
-    if (!isPlayingAudio) {
-        playNextAudioInQueue();
-    }
+    // 5. Schedule buffer on Web Audio Clock (Gapless, Sample-Accurate)
+    scheduleAudioBuffer(audioBuffer);
 }
 
-function playNextAudioInQueue() {
-    if (audioQueue.length === 0) {
-        isPlayingAudio = false;
-        return;
+function scheduleAudioBuffer(buffer) {
+    if (!audioCtx) return;
+
+    const now = audioCtx.currentTime;
+    // Jitter buffer of 40ms for smooth continuous streaming
+    if (nextStartTime < now) {
+        nextStartTime = now + 0.04;
     }
 
-    isPlayingAudio = true;
-    const buffer = audioQueue.shift();
-    
-    currentSourceNode = audioCtx.createBufferSource();
-    currentSourceNode.buffer = buffer;
-    currentSourceNode.connect(audioCtx.destination);
-    
-    currentSourceNode.onended = () => {
-        playNextAudioInQueue();
-    };
+    const source = audioCtx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(audioCtx.destination);
+    source.start(nextStartTime);
 
-    currentSourceNode.start(0);
+    nextStartTime += buffer.duration;
+    activeSourceNodes.push(source);
+
+    source.onended = () => {
+        const idx = activeSourceNodes.indexOf(source);
+        if (idx > -1) activeSourceNodes.splice(idx, 1);
+    };
 }
 
 function stopAllAudioPlayback() {
-    audioQueue = [];
-    isPlayingAudio = false;
-    if (currentSourceNode) {
-        try { currentSourceNode.stop(); } catch(e){}
-        currentSourceNode = null;
+    activeSourceNodes.forEach(node => {
+        try { node.stop(); } catch(e){}
+    });
+    activeSourceNodes = [];
+    nextStartTime = 0;
+    pendingByteQueue = new Uint8Array(0);
+}
+
+// ─────────────────────────────────────────────
+// WAV Blob Generator Utility
+// ─────────────────────────────────────────────
+
+function createWavBlob(int16Samples, sampleRate = 24000) {
+    const buffer = new ArrayBuffer(44 + int16Samples.length * 2);
+    const view = new DataView(buffer);
+
+    /* RIFF identifier */
+    writeString(view, 0, 'RIFF');
+    /* RIFF chunk length */
+    view.setUint32(4, 36 + int16Samples.length * 2, true);
+    /* RIFF type */
+    writeString(view, 8, 'WAVE');
+    /* format chunk identifier */
+    writeString(view, 12, 'fmt ');
+    /* format chunk length */
+    view.setUint32(16, 16, true);
+    /* sample format (raw PCM) */
+    view.setUint16(20, 1, true);
+    /* channel count (mono) */
+    view.setUint16(22, 1, true);
+    /* sample rate */
+    view.setUint32(24, sampleRate, true);
+    /* byte rate (sampleRate * 2) */
+    view.setUint32(28, sampleRate * 2, true);
+    /* block align */
+    view.setUint16(32, 2, true);
+    /* bits per sample */
+    view.setUint16(34, 16, true);
+    /* data chunk identifier */
+    writeString(view, 36, 'data');
+    /* data chunk length */
+    view.setUint32(40, int16Samples.length * 2, true);
+
+    // Write samples
+    let offset = 44;
+    for (let i = 0; i < int16Samples.length; i++, offset += 2) {
+        view.setInt16(offset, int16Samples[i], true);
+    }
+
+    return new Blob([buffer], { type: 'audio/wav' });
+}
+
+function writeString(view, offset, string) {
+    for (let i = 0; i < string.length; i++) {
+        view.setUint8(offset + i, string.charCodeAt(i));
     }
 }
 
