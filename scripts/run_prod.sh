@@ -73,20 +73,29 @@ install_deps() {
         --extra-index-url https://download.pytorch.org/whl/cu121
 
     # [PYTHON 3.11 FIX] Patch coqpit's broken checks for Python 3.11 Typing features
-    # 1. issubclass() crashes on typing.Union or List in Python 3.11
-    # 2. is_union() fails to detect the new Python 3.10+ types.UnionType (the | operator)
     python3 -c "
 import os, re
 path = '/workspace/venv/lib/python3.11/site-packages/coqpit/coqpit.py'
 if os.path.exists(path):
     with open(path, 'r') as f: content = f.read()
-    # Idempotent replacements using regex negative lookbehind
+    
+    # 1. Define safe_issubclass if it doesn't exist
+    if 'def safe_issubclass' not in content:
+        safe_func = '''
+def safe_issubclass(cls, classinfo) -> bool:
+    try:
+        return issubclass(cls, classinfo)
+    except TypeError:
+        return False
+'''
+        content = safe_func + content
+
+    # 2. Replace dangerous issubclass calls with safe_issubclass
     content = re.sub(r'(?<!safe_)issubclass\(type\(x\), Serializable\)', 'safe_issubclass(type(x), Serializable)', content)
     content = re.sub(r'(?<!safe_)issubclass\(x, Serializable\)', 'safe_issubclass(x, Serializable)', content)
-    content = re.sub(r'(?<!safe_)issubclass\(field_type, Serializable\)', 'safe_issubclass(field_type, Serializable)', content)
-    # Clean up any corruption from previous non-idempotent script runs
+    content = re.sub(r'(?<!safe_)issubclass\(base_type, Serializable\)', 'safe_issubclass(base_type, Serializable)', content)
     content = content.replace('safe_safe_issubclass', 'safe_issubclass')
-    content = re.sub(r'def is_union\(arg_type: Any\) -> bool:(?!\n    import types)', 'def is_union(arg_type: Any) -> bool:\n    import types\n    if getattr(types, "UnionType", None) and isinstance(arg_type, types.UnionType): return True', content)
+    
     with open(path, 'w') as f: f.write(content)
 "
 
