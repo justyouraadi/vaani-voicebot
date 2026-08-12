@@ -17,6 +17,8 @@ def patch_coqpit():
     with open(path, "r", encoding="utf-8") as f:
         content = f.read()
 
+    original_length = len(content)
+
     # 1. Fix missing quotes around UnionType in coqpit.py
     content = content.replace(
         'getattr(types, UnionType, None)',
@@ -67,11 +69,7 @@ def safe_issubclass(cls, classinfo) -> bool:
         except Exception:
             pass"""
 
-    content = re.sub(
-        r'def _deserialize\(x: Any, field_type: Any\) -> Any:',
-        str_eval_code,
-        content
-    )
+    content = content.replace('def _deserialize(x: Any, field_type: Any) -> Any:', str_eval_code)
 
     # 4. Use get_type_hints in deserialize() method (PEP 563 fix for dataclass fields)
     old_deserialize_loop = """        dataclass_fields = fields(self)
@@ -89,8 +87,8 @@ def safe_issubclass(cls, classinfo) -> bool:
 
     content = content.replace(old_deserialize_loop, new_deserialize_loop)
     content = content.replace(
-        'value = _deserialize(data[field.name], field.type)',
-        'value = _deserialize(data[field.name], field_type)'
+        'value = _deserialize(value, field.type)',
+        'value = _deserialize(value, field_type)'
     )
 
     # 5. Patch is_union() to support Python 3.10+ types.UnionType (| syntax)
@@ -164,7 +162,7 @@ def safe_issubclass(cls, classinfo) -> bool:
     with open(path, "w", encoding="utf-8") as f:
         f.write(content)
 
-    print("✅ coqpit.py successfully patched for Python 3.11!")
+    print(f"✅ coqpit.py successfully patched for Python 3.11! ({original_length} -> {len(content)} bytes)")
 
 if __name__ == "__main__":
     patch_coqpit()
