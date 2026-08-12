@@ -66,8 +66,9 @@ class VoicePipeline:
 
         # State
         self._running = False
-        self._current_llm_task: Optional[asyncio.Task] = None
-        self._current_tts_task: Optional[asyncio.Task] = None
+        self._turn_task: Optional[asyncio.Task] = None
+        self._tts_task: Optional[asyncio.Task] = None
+        self._pending_turns: list[str] = []
         self._metrics: dict = {
             "total_conversations": 0,
             "total_barge_ins": 0,
@@ -110,21 +111,27 @@ class VoicePipeline:
                 "timestamp": time.time(),
             })
 
-            # Start the LLM → TTS pipeline
-            await self._process_user_input(text)
+            # Queue the turn. The STT receive loop stays responsive so the user's
+            # next utterance (or a barge-in) is still processed while we reply.
+            self._pending_turns.append(text)
+            self._maybe_start_turn()
 
         async def on_speech_end(data):
             logger.debug(f"[{self.session_id}] 🔇 User speech ended")
 
         async def on_barge_in(partial_response):
             logger.info(f"[{self.session_id}] 🛑 Barge-in! Cancelling AI response.")
-            self.llm.add_interrupted_message(partial_response)
+            if self._turn_task and not self._turn_task.done():
+                # Mark the in-flight LLM response as interrupted so it is recorded
+                # exactly once (with a marker) instead of twice.
+                self.llm.mark_interrupted()
 
-            # Cancel running tasks
-            if self._current_tts_task and not self._current_tts_task.done():
+            # Cancel running tasks for real — these are actual task handles now.
+            if self._tts_task and not self._tts_task.done():
                 self.tts.cancel()
-            if self._current_llm_task and not self._current_llm_task.done():
-                self._current_llm_task.cancel()
+                self._tts_task.cancel()
+            if self._turn_task and not self._turn_task.done():
+                self._turn_task.cancel()
 
             self._metrics["total_barge_ins"] += 1
 
@@ -172,18 +179,44 @@ class VoicePipeline:
         self._running = False
 
         # Cancel any running tasks
-        for task in [self._current_llm_task, self._current_tts_task]:
+        for task in [self._turn_task, self._tts_task]:
             if task and not task.done():
                 task.cancel()
                 try:
                     await task
                 except asyncio.CancelledError:
                     pass
+        self._turn_task = None
+        self._tts_task = None
 
         await self.stt.disconnect()
         await self.tts.close()
 
         logger.info(f"[{self.session_id}] Pipeline stopped")
+
+    async def reset(self):
+        """Reset conversation state and cancel any in-flight turn."""
+        if self._turn_task and not self._turn_task.done():
+            self._turn_task.cancel()
+            try:
+                await self._turn_task
+            except asyncio.CancelledError:
+                pass
+        self._turn_task = None
+        self._pending_turns = []
+        self.llm.reset_conversation()
+        self.barge_in.reset()
+        logger.info(f"[{self.session_id}] Conversation reset")
+
+    def _maybe_start_turn(self):
+        """Start the next queued user turn if none is currently running."""
+        if self._turn_task and not self._turn_task.done():
+            return
+        if not self._pending_turns:
+            return
+        text = self._pending_turns.pop(0)
+        logger.info(f"[{self.session_id}] Starting turn: \"{text[:80]}\"")
+        self._turn_task = asyncio.create_task(self._run_turn(text))
 
     async def process_audio_chunk(self, pcm_bytes: bytes):
         """
@@ -207,21 +240,24 @@ class VoicePipeline:
             else:
                 await self.barge_in.check_barge_in(False)
 
-    async def _process_user_input(self, text: str):
+    async def _run_turn(self, text: str):
         """
-        Process transcribed user text through LLM → TTS pipeline.
+        Process one transcribed user utterance through LLM → TTS.
 
-        This is the streaming cascade:
+        This is the streaming cascade, run as a background task so the STT
+        receive loop keeps working (true turn-taking):
         1. LLM generates tokens (streamed via SSE)
         2. Sentence chunker batches tokens at punctuation
-        3. TTS synthesizes each chunk (streamed)
-        4. Audio chunks are sent to browser immediately
+        3. A dedicated TTS worker synthesizes each chunk as a full WAV
+           — while the main loop keeps consuming the next LLM tokens.
+        4. The worker sends audio to the browser in chunk order; chunk N plays
+           while chunk N+1 is still being synthesized.
         """
         self._metrics["total_conversations"] += 1
         pipeline_start = time.perf_counter()
         first_audio_time = None
 
-        # Update state
+        # Update state (this also clears the barge-in cancel event)
         self.barge_in.set_state(PipelineState.THINKING)
         await self._send_json({
             "type": "state",
@@ -235,6 +271,53 @@ class VoicePipeline:
         self.vad.reset()
 
         accumulated_response = []
+        chunk_queue: asyncio.Queue = asyncio.Queue()
+        filler_detected = False
+
+        async def tts_worker():
+            """Synthesize queued chunks in order and stream WAVs to the browser."""
+            nonlocal first_audio_time
+            while True:
+                item = await chunk_queue.get()
+                try:
+                    if item is None:
+                        break
+                    chunk_index, chunk_text = item
+
+                    if self.barge_in.cancel_event.is_set():
+                        break
+
+                    wav_bytes = await self.tts.synthesize_full(chunk_text, language="auto")
+                    if wav_bytes and not self.barge_in.cancel_event.is_set():
+                        if first_audio_time is None:
+                            first_audio_time = (time.perf_counter() - pipeline_start) * 1000
+                            logger.info(
+                                f"[{self.session_id}] ⚡ Time-to-First-Audio: {first_audio_time:.0f}ms"
+                            )
+                            if self.barge_in.state != PipelineState.SPEAKING:
+                                self.barge_in.set_state(PipelineState.SPEAKING)
+                                await self._send_json({
+                                    "type": "state",
+                                    "state": "speaking",
+                                    "timestamp": time.time(),
+                                })
+
+                        # JSON header so the browser knows the next binary is a WAV
+                        await self._send_json({
+                            "type": "audio_wav",
+                            "chunk_index": chunk_index,
+                            "bytes": len(wav_bytes),
+                            "timestamp": time.time(),
+                        })
+                        await self._send_audio(wav_bytes)
+                except asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    logger.error(f"[{self.session_id}] TTS worker error: {e}", exc_info=True)
+                finally:
+                    chunk_queue.task_done()
+
+        self._tts_task = asyncio.create_task(tts_worker())
 
         try:
             # Start LLM streaming
@@ -250,14 +333,9 @@ class VoicePipeline:
                 accumulated_response.append(chunk_text)
                 self.barge_in.track_partial_response(" ".join(accumulated_response))
 
-                # Switch to speaking state on first chunk
-                if self.barge_in.state == PipelineState.THINKING:
-                    self.barge_in.set_state(PipelineState.SPEAKING)
-                    await self._send_json({
-                        "type": "state",
-                        "state": "speaking",
-                        "timestamp": time.time(),
-                    })
+                # Track filler words on the first chunk (metrics + logging)
+                if not filler_detected:
+                    filler_detected = bool(self.filler.check_text(chunk_text))
 
                 # Send chunk text to browser for display
                 await self._send_json({
@@ -266,37 +344,22 @@ class VoicePipeline:
                     "timestamp": time.time(),
                 })
 
-                # ── Synthesize as full WAV blob ──────────────────────────────────
-                # Request complete WAV bytes for this sentence chunk.
-                # This is the same code path as the Voice Cloner (which worked perfectly).
-                # The WAV blob is sent immediately so the browser starts playing
-                # while the LLM continues generating the next sentence chunk.
                 if self.barge_in.cancel_event.is_set():
                     break
 
-                wav_bytes = await self.tts.synthesize_full(chunk_text, language="auto")
-                if wav_bytes and not self.barge_in.cancel_event.is_set():
-                    chunk_index = len(accumulated_response) - 1
+                # Hand the chunk to the TTS worker immediately and keep consuming
+                # the LLM stream — the worker synthesizes while the LLM thinks.
+                chunk_queue.put_nowait((len(accumulated_response) - 1, chunk_text))
 
-                    if first_audio_time is None:
-                        first_audio_time = (time.perf_counter() - pipeline_start) * 1000
-                        logger.info(
-                            f"[{self.session_id}] ⚡ Time-to-First-Audio: {first_audio_time:.0f}ms"
-                        )
-
-                    # Send JSON header so browser knows the next binary message is a WAV
-                    await self._send_json({
-                        "type": "audio_wav",
-                        "chunk_index": chunk_index,
-                        "bytes": len(wav_bytes),
-                        "timestamp": time.time(),
-                    })
-
-                    # Send the complete WAV binary — browser plays it via new Audio()
-                    await self._send_audio(wav_bytes)
+            # Signal end of chunks, then wait for all audio to be synthesized/sent
+            chunk_queue.put_nowait(None)
+            if self._tts_task and not self._tts_task.done():
+                await self._tts_task
+            self._tts_task = None
 
         except asyncio.CancelledError:
             logger.info(f"[{self.session_id}] Pipeline task cancelled")
+            raise
         except Exception as e:
             logger.error(f"[{self.session_id}] Pipeline error: {e}", exc_info=True)
             await self._send_json({
@@ -304,6 +367,15 @@ class VoicePipeline:
                 "message": f"Pipeline error: {str(e)}",
             })
         finally:
+            # Make sure the TTS worker is torn down (barge-in path)
+            if self._tts_task and not self._tts_task.done():
+                self._tts_task.cancel()
+                try:
+                    await self._tts_task
+                except (asyncio.CancelledError, Exception):
+                    pass
+            self._tts_task = None
+
             total_ms = (time.perf_counter() - pipeline_start) * 1000
 
             # Send completion
@@ -322,6 +394,7 @@ class VoicePipeline:
                 "total_ms": round(total_ms, 1),
                 "chunks": len(accumulated_response),
                 "barge_in": self.barge_in.cancel_event.is_set(),
+                "filler": filler_detected,
                 "timestamp": time.time(),
             })
 
@@ -338,6 +411,9 @@ class VoicePipeline:
                 if first_audio_time
                 else f"[{self.session_id}] Pipeline complete (no audio): total={total_ms:.0f}ms"
             )
+
+            self._turn_task = None
+            self._maybe_start_turn()
 
     def get_metrics(self) -> dict:
         """Return session metrics."""

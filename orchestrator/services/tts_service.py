@@ -149,6 +149,9 @@ class TTSService:
                 return response.content
             logger.error(f"TTS full synthesis error {response.status_code}: {response.text[:200]}")
             return None
+        except asyncio.CancelledError:
+            logger.info("TTS full synthesis cancelled (barge-in)")
+            raise
         except Exception as e:
             logger.error(f"TTS full synthesis error: {e}")
             return None

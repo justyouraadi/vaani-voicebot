@@ -29,7 +29,9 @@ import uvicorn
 # Configuration
 # ─────────────────────────────────────────────
 WHISPER_MODEL = os.getenv("WHISPER_MODEL", "large-v3-turbo")
-WHISPER_LANGUAGE = os.getenv("WHISPER_LANGUAGE", "hi")
+# Support "auto" for language auto-detection
+_raw_lang = os.getenv("WHISPER_LANGUAGE", "hi")
+WHISPER_LANGUAGE = None if _raw_lang.lower() in ("auto", "") else _raw_lang
 WHISPER_DEVICE = os.getenv("WHISPER_DEVICE", "cuda" if torch.cuda.is_available() else "cpu")
 WHISPER_COMPUTE_TYPE = os.getenv("WHISPER_COMPUTE_TYPE", "float16" if WHISPER_DEVICE == "cuda" else "int8")
 
@@ -206,7 +208,7 @@ class TranscriptionSession:
 
         result = {
             "text": text,
-            "language": info.language if info else WHISPER_LANGUAGE,
+            "language": info.language if info else (WHISPER_LANGUAGE or "hi"),
             "language_probability": round(info.language_probability, 3) if info else 0.0,
             "transcription_ms": round(elapsed_ms, 1),
             "audio_duration_ms": round(duration_s * 1000, 1),
@@ -238,7 +240,7 @@ async def health_check():
         "service": "stt-server",
         "model": WHISPER_MODEL,
         "device": WHISPER_DEVICE,
-        "language": WHISPER_LANGUAGE,
+        "language": WHISPER_LANGUAGE or "auto",
         "vad_threshold": VAD_THRESHOLD,
     })
 
@@ -250,7 +252,7 @@ async def model_info():
         "whisper_model": WHISPER_MODEL,
         "whisper_device": WHISPER_DEVICE,
         "whisper_compute_type": WHISPER_COMPUTE_TYPE,
-        "whisper_language": WHISPER_LANGUAGE,
+        "whisper_language": WHISPER_LANGUAGE or "auto",
         "vad_threshold": VAD_THRESHOLD,
         "vad_min_silence_ms": VAD_MIN_SILENCE_MS,
         "vad_speech_pad_ms": VAD_SPEECH_PAD_MS,
@@ -348,7 +350,8 @@ async def websocket_transcribe(ws: WebSocket):
                     # Transcribe the full speech segment
                     audio = session.get_buffered_audio()
                     if audio is not None and len(audio) > CHUNK_SIZE_SAMPLES:
-                        result = session.transcribe(audio)
+                        loop = asyncio.get_running_loop()
+                        result = await loop.run_in_executor(None, session.transcribe, audio)
                         if result["text"]:
                             await ws.send_json({
                                 "type": "final",
@@ -368,7 +371,8 @@ async def websocket_transcribe(ws: WebSocket):
                     if (now - last_partial_time) * 1000 >= PARTIAL_INTERVAL_MS:
                         audio = session.get_buffered_audio()
                         if audio is not None and len(audio) > CHUNK_SIZE_SAMPLES * 3:
-                            result = session.transcribe(audio)
+                            loop = asyncio.get_running_loop()
+                            result = await loop.run_in_executor(None, session.transcribe, audio)
                             if result["text"]:
                                 await ws.send_json({
                                     "type": "partial",

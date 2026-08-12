@@ -276,8 +276,7 @@ async def websocket_voice_pipeline(ws: WebSocket):
                         break
 
                     elif msg_type == "reset":
-                        pipeline.llm.reset_conversation()
-                        pipeline.barge_in.reset()
+                        await pipeline.reset()
                         await send_json({"type": "reset_ack"})
                         logger.info(f"[{session_id}] Conversation reset")
 

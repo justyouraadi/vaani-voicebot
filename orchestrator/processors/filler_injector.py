@@ -91,3 +91,25 @@ class FillerInjector:
         self._detected_filler = None
         self._is_first_tokens = True
         self._token_buffer = []
+
+    def check_text(self, text: str) -> Optional[str]:
+        """
+        Check if the given text chunk starts with a filler word.
+
+        This is used when we receive whole chunks from the sentence chunker
+        rather than individual tokens. Returns the filler if detected.
+        """
+        if not self._is_first_tokens:
+            return None
+
+        first_word = text.strip().split(" ", 1)[0].strip()
+        clean = first_word.lower().rstrip(".,!?;: ")
+
+        if clean in self._filler_set:
+            self._detected_filler = first_word
+            self._is_first_tokens = False
+            logger.info(f"Filler detected: \"{first_word}\"")
+            return first_word
+
+        self._is_first_tokens = False
+        return None

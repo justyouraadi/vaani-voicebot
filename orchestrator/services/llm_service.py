@@ -47,6 +47,7 @@ class LLMService:
         self.conversation_history: list[dict] = []
         self.max_history_turns = 10  # Keep last N turns
         self.system_prompt = get_system_prompt("hi")
+        self._interrupted = False
 
         logger.info(f"LLM Service initialized: {self.model} @ {self.base_url}")
 
@@ -103,6 +104,7 @@ class LLMService:
         Yields:
             Individual tokens as strings
         """
+        self._interrupted = False
         self.add_user_message(user_text)
         messages = self._build_messages()
 
@@ -158,7 +160,11 @@ class LLMService:
             response_text = "".join(full_response)
 
             if response_text:
-                self.add_assistant_message(response_text)
+                if self._interrupted:
+                    self.add_assistant_message(response_text.rstrip() + " [interrupted by user]")
+                else:
+                    self.add_assistant_message(response_text)
+                self._interrupted = False
 
             logger.info(
                 f"LLM complete: {token_count} tokens in {elapsed_ms:.0f}ms "
@@ -177,6 +183,10 @@ class LLMService:
         """Clear conversation history."""
         self.conversation_history = []
         logger.info("Conversation history cleared")
+
+    def mark_interrupted(self):
+        """Mark the current response as interrupted by barge-in."""
+        self._interrupted = True
 
     async def check_health(self) -> bool:
         """Check if the LLM endpoint is reachable."""

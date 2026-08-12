@@ -76,7 +76,7 @@ services:
   # 🧠 Pillar 2: LLM Server (vLLM)
   # ─────────────────────────────────────────────
   vllm-server:
-    image: vllm/vllm-openai:latest
+    image: vllm/vllm-openai:v0.6.3.post1
     container_name: vaani-vllm
     ports:
       - "8000:8000"
@@ -88,6 +88,7 @@ services:
       --enforce-eager
       --gpu-memory-utilization 0.70
       --max-model-len 8128
+      --enable-prefix-caching
     deploy:
       resources:
         reservations:
