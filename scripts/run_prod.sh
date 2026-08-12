@@ -76,7 +76,7 @@ install_deps() {
     pip install -q --force-reinstall --no-deps coqpit
 
     # [PYTHON 3.11 FIX] Patch coqpit's broken checks for Python 3.11 Typing features
-    python3 -c "
+    python3 << 'EOF'
 import os, re, sys
 
 path = '/workspace/venv/lib/python3.11/site-packages/coqpit/coqpit.py'
@@ -92,18 +92,17 @@ original = content  # keep for change detection
 # ── Self-Healing: Strip any previous injections or corrupted patches ──────
 content = re.sub(
     r'(?s)# \[PATCH\].*?raise ValueError\(f" \[!\] \'{type\(x\)}\' value type of \'{x}\' does not match \'{field_type}\' field type\."\)',
-    'raise ValueError(f\" [!] \'{type(x)}\' value type of \'{x}\' does not match \'{field_type}\' field type.\")',
+    'raise ValueError(f" [!] \'{type(x)}\' value type of \'{x}\' does not match \'{field_type}\' field type.")',
     content
 )
 
 # ── Patch 1: Fix UnionType NameError (Python 3.10+) ───────────────────────
 content = content.replace(
     'getattr(types, UnionType, None)',
-    'getattr(types, \"UnionType\", None)'
+    'getattr(types, "UnionType", None)'
 )
 
 # ── Patch 2: Fix safe_issubclass (must be idempotent) ─────────────────────
-# Strip out any previous/corrupted injections first
 content = re.sub(
     r'(?s)def safe_issubclass\(cls, classinfo\).*?return False\s*',
     '',
@@ -111,7 +110,6 @@ content = re.sub(
 )
 content = content.replace('safe_issubclass', 'issubclass')
 
-# Inject a clean safe_issubclass at file end
 safe_func = '''
 
 def safe_issubclass(cls, classinfo) -> bool:
@@ -122,7 +120,6 @@ def safe_issubclass(cls, classinfo) -> bool:
 '''
 content = content + safe_func
 
-# Replace dangerous raw issubclass calls with the safe version
 for target in [
     'issubclass(type(x), Serializable)',
     'issubclass(x, Serializable)',
@@ -130,12 +127,11 @@ for target in [
 ]:
     content = content.replace(target, 'safe_' + target)
 
-# Fix double-safe prefix if script run multiple times
 content = content.replace('safe_safe_issubclass', 'safe_issubclass')
 
 # ── Patch 3: Fix 'float | list[float]' Union deserialization crash ─────────
-old_raise = \"raise ValueError(f\\\" [!] '{type(x)}' value type of '{x}' does not match '{field_type}' field type.\\\")\"
-new_raise = \"\"\"# [PATCH] Accept value if it already matches any member of a union type
+old_raise = 'raise ValueError(f" [!] \'{type(x)}\' value type of \'{x}\' does not match \'{field_type}\' field type.")'
+new_raise = '''# [PATCH] Accept value if it already matches any member of a union type
     _union_members = getattr(field_type, '__args__', None)
     if _union_members:
         for _member in _union_members:
@@ -144,7 +140,7 @@ new_raise = \"\"\"# [PATCH] Accept value if it already matches any member of a u
                     return x
             except TypeError:
                 pass
-    raise ValueError(f\\\" [!] '{type(x)}' value type of '{x}' does not match '{field_type}' field type.\\\")\"\"\"
+    raise ValueError(f" [!] \'{type(x)}\' value type of \'{x}\' does not match \'{field_type}\' field type.")'''
 
 content = content.replace(old_raise, new_raise)
 
@@ -153,7 +149,7 @@ with open(path, 'w') as f:
 
 changed = 'YES' if content != original else 'NO (already patched)'
 print(f'coqpit.py patched successfully (changed={changed})')
-"
+EOF
 
     log_success "All dependencies installed in venv!"
 }
