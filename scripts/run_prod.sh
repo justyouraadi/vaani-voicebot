@@ -34,8 +34,8 @@ VLLM_VERSION="${VLLM_VERSION:-0.6.6.post1}"
 TORCH_LLM_VERSION="${TORCH_LLM_VERSION:-2.4.0}"
 TORCHVISION_LLM_VERSION="${TORCHVISION_LLM_VERSION:-0.19.0}"
 TORCHAUDIO_LLM_VERSION="${TORCHAUDIO_LLM_VERSION:-2.4.0}"
-# Audio stack
-TORCH_AUDIO_VERSION="${TORCH_AUDIO_VERSION:-2.3.0}"
+# Audio stack - torch 2.5.1 required by transformers>=4.57 (coqui-tts)
+TORCH_AUDIO_VERSION="${TORCH_AUDIO_VERSION:-2.5.1}"
 # Don't pin transformers for audio - let coqui-tts pull its required version (>=4.57)
 # TRANSFORMERS_AUDIO_VERSION="${TRANSFORMERS_AUDIO_VERSION:-4.57.0}"
 
@@ -99,10 +99,10 @@ install_deps() {
     log_info "Installing audio stack: torch ${TORCH_AUDIO_VERSION}..."
     pip install -q --upgrade pip
 
-    # Torch 2.3.0 cu121 works on CUDA 12.4 driver via LD_LIBRARY_PATH
+    # Torch 2.5.1 cu121 works on CUDA 12.4 driver via LD_LIBRARY_PATH
     pip install -q "torch==${TORCH_AUDIO_VERSION}" \
-        "torchvision==0.18.0" \
-        "torchaudio==2.3.0" \
+        "torchvision==0.20.0" \
+        "torchaudio==2.5.1" \
         --extra-index-url https://download.pytorch.org/whl/cu121
 
     # STT, TTS, Orchestrator requirements (coqui-tts will pull transformers>=4.57)
