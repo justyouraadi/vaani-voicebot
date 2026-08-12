@@ -250,7 +250,7 @@ class VoicePipeline:
                 accumulated_response.append(chunk_text)
                 self.barge_in.track_partial_response(" ".join(accumulated_response))
 
-                # Switch to speaking state
+                # Switch to speaking state on first chunk
                 if self.barge_in.state == PipelineState.THINKING:
                     self.barge_in.set_state(PipelineState.SPEAKING)
                     await self._send_json({
@@ -266,10 +266,17 @@ class VoicePipeline:
                     "timestamp": time.time(),
                 })
 
-                # Stream TTS audio for this chunk
-                async for audio_chunk in self.tts.synthesize_stream(chunk_text):
-                    if self.barge_in.cancel_event.is_set():
-                        break
+                # ── Synthesize as full WAV blob ──────────────────────────────────
+                # Request complete WAV bytes for this sentence chunk.
+                # This is the same code path as the Voice Cloner (which worked perfectly).
+                # The WAV blob is sent immediately so the browser starts playing
+                # while the LLM continues generating the next sentence chunk.
+                if self.barge_in.cancel_event.is_set():
+                    break
+
+                wav_bytes = await self.tts.synthesize_full(chunk_text, language="auto")
+                if wav_bytes and not self.barge_in.cancel_event.is_set():
+                    chunk_index = len(accumulated_response) - 1
 
                     if first_audio_time is None:
                         first_audio_time = (time.perf_counter() - pipeline_start) * 1000
@@ -277,7 +284,16 @@ class VoicePipeline:
                             f"[{self.session_id}] ⚡ Time-to-First-Audio: {first_audio_time:.0f}ms"
                         )
 
-                    await self._send_audio(audio_chunk)
+                    # Send JSON header so browser knows the next binary message is a WAV
+                    await self._send_json({
+                        "type": "audio_wav",
+                        "chunk_index": chunk_index,
+                        "bytes": len(wav_bytes),
+                        "timestamp": time.time(),
+                    })
+
+                    # Send the complete WAV binary — browser plays it via new Audio()
+                    await self._send_audio(wav_bytes)
 
         except asyncio.CancelledError:
             logger.info(f"[{self.session_id}] Pipeline task cancelled")

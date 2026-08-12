@@ -116,15 +116,38 @@ class TTSService:
             self._cancel_event.set()
 
     async def synthesize_full(self, text: str, language: str = "hi") -> Optional[bytes]:
-        """Non-streaming synthesis (returns complete WAV bytes)."""
+        """
+        Non-streaming synthesis — returns complete WAV bytes.
+
+        This is the GOLD STANDARD audio path: same code as the Voice Cloner
+        that produced perfectly clean audio. Each sentence chunk gets its own
+        full inference() call and returns a complete WAV file.
+
+        Args:
+            text: Text to synthesize
+            language: 'hi', 'en', or 'auto' (let TTS server auto-detect script)
+
+        Returns:
+            Complete WAV bytes, or None on error
+        """
         try:
+            payload: dict = {
+                "text": text,
+                "stream": False,
+            }
+            # 'auto' means don't set language — let the TTS server auto-detect
+            # based on unicode script (Devanagari → hi, Latin → en)
+            if language != "auto":
+                payload["language"] = language
+
             response = await self.client.post(
                 self.url,
-                json={"text": text, "language": language, "stream": False},
+                json=payload,
+                timeout=60.0,  # Full inference can take up to ~30s on first call
             )
             if response.status_code == 200:
                 return response.content
-            logger.error(f"TTS full synthesis error: {response.status_code}")
+            logger.error(f"TTS full synthesis error {response.status_code}: {response.text[:200]}")
             return None
         except Exception as e:
             logger.error(f"TTS full synthesis error: {e}")

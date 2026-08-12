@@ -1,104 +1,103 @@
 /**
- * 🎙️ VaaniAI — Real-Time Gemini Live Agent Engine
+ * 🎙️ VaaniAI — Real-Time Gemini Live Agent
  *
- * KEY AUDIO APPROACH: Each TTS chunk is requested as a FULL WAV BLOB (not raw PCM streaming).
- * This mirrors the working Voice Cloner logic and avoids all PCM byte-alignment / Web Audio API issues.
- * Audio blobs are queued and played sequentially via native HTML5 Audio elements.
+ * AUDIO ARCHITECTURE:
+ * ───────────────────
+ * The server sends audio as complete WAV blobs (one per sentence chunk).
+ * Protocol:
+ *   Server → JSON: {"type": "audio_wav", "chunk_index": 0, "bytes": N}
+ *   Server → Binary: <N bytes of complete WAV file>
+ *
+ * The browser queues WAV blobs and plays them with native Audio elements.
+ * Chunk 1 starts playing while chunk 2 is still being synthesized on the server.
+ * This is the same proven approach as the Voice Cloner (which produced perfect audio).
  */
 
 const API_BASE = window.location.origin + '/api';
 
-// DOM Elements
+// DOM refs
 const els = {
-    serverStatus: document.getElementById('serverStatusText'),
-    liveVoiceSelect: document.getElementById('liveVoiceSelect'),
-    geminiOrb: document.getElementById('geminiOrb'),
-    orbIcon: document.getElementById('orbIcon'),
-    orbStatusText: document.getElementById('orbStatusText'),
-    btnLiveCall: document.getElementById('btnLiveCall'),
-    callBtnText: document.getElementById('callBtnText'),
-    metricTTFA: document.getElementById('metricTTFA'),
-    metricDuration: document.getElementById('metricDuration'),
-    metricBargeIn: document.getElementById('metricBargeIn'),
-    transcriptFeed: document.getElementById('transcriptFeed'),
+    serverStatus:       document.getElementById('serverStatusText'),
+    liveVoiceSelect:    document.getElementById('liveVoiceSelect'),
+    geminiOrb:          document.getElementById('geminiOrb'),
+    orbIcon:            document.getElementById('orbIcon'),
+    orbStatusText:      document.getElementById('orbStatusText'),
+    btnLiveCall:        document.getElementById('btnLiveCall'),
+    callBtnText:        document.getElementById('callBtnText'),
+    metricTTFA:         document.getElementById('metricTTFA'),
+    metricDuration:     document.getElementById('metricDuration'),
+    metricBargeIn:      document.getElementById('metricBargeIn'),
+    transcriptFeed:     document.getElementById('transcriptFeed'),
     btnClearTranscript: document.getElementById('btnClearTranscript'),
 };
 
-// Live Call State
+// Call state
 let isLiveCallActive = false;
-let ws = null;
-let audioCtx = null;
-let micStream = null;
-let workletNode = null;
-let callStartTime = null;
+let ws               = null;
+let audioCtx         = null;
+let micStream        = null;
+let workletNode      = null;
+let callStartTime    = null;
 let durationInterval = null;
 
-// Audio Playback Queue (WAV Blobs played via HTML Audio)
-let audioQueue = [];
-let isPlayingAudio = false;
-let currentAudio = null;
-let turnWavChunks = [];    // accumulate PCM bytes for download
-let activeAiBubble = null;
+// WAV Queue (HTML Audio playback)
+let audioQueue       = [];
+let isPlayingAudio   = false;
+let currentAudio     = null;
+let expectingWavBlob = false;
+
+// Per-turn accumulator (for download button)
+let turnWavBlobs     = [];
+let activeAiBubble   = null;
 let activeAiBubbleText = '';
 
-// Pending byte buffer for WAV accumulation (from raw PCM stream)
-let pendingByteQueue = new Uint8Array(0);
-
-// Initialize
+// Init
 async function init() {
     await fetchVoices();
     setupEventListeners();
+    updateCallUI('idle');
 }
 
 async function fetchVoices() {
     try {
-        const response = await fetch(`${API_BASE}/voices`);
-        if (!response.ok) throw new Error('Failed to fetch voices');
-        const data = await response.json();
-        const voices = data.voices || [];
+        const resp = await fetch(`${API_BASE}/voices`);
+        if (!resp.ok) throw new Error('Cannot fetch voices');
+        const data = await resp.json();
+        if (!els.liveVoiceSelect) return;
         els.liveVoiceSelect.innerHTML = '';
-        if (voices.length === 0) {
-            els.liveVoiceSelect.innerHTML = '<option value="" disabled selected>No voices available</option>';
-            return;
-        }
-        voices.forEach((voice, index) => {
+        (data.voices || []).forEach((v, i) => {
             const opt = document.createElement('option');
-            opt.value = voice.filename;
-            opt.textContent = voice.name;
-            if (index === 0) opt.selected = true;
+            opt.value = v.filename;
+            opt.textContent = v.name;
+            if (i === 0) opt.selected = true;
             els.liveVoiceSelect.appendChild(opt);
         });
-    } catch (error) {
-        console.error('Error fetching voices:', error);
-        els.serverStatus.textContent = 'Disconnected';
+    } catch (e) {
+        console.error('fetchVoices:', e);
+        if (els.serverStatus) els.serverStatus.textContent = 'Disconnected';
     }
 }
 
-// ─────────────────────────────────────────────
-// 🎙️ LIVE CALL ENGINE
-// ─────────────────────────────────────────────
-
+// Event Listeners
 function setupEventListeners() {
-    els.btnLiveCall.addEventListener('click', toggleLiveCall);
-    els.btnClearTranscript.addEventListener('click', () => {
-        els.transcriptFeed.innerHTML = `
-            <div class="chat-placeholder">
-                <p>Click <strong>"Start Live Conversation"</strong> and speak. Vaani's response will stream here live.</p>
-            </div>`;
+    els.btnLiveCall?.addEventListener('click', toggleLiveCall);
+    els.btnClearTranscript?.addEventListener('click', () => {
+        if (els.transcriptFeed) {
+            els.transcriptFeed.innerHTML = `
+                <div class="chat-placeholder">
+                    <p>Click <strong>"Start Live Conversation"</strong> and speak.</p>
+                </div>`;
+        }
     });
 }
 
+// Live Call
 async function toggleLiveCall() {
-    if (!isLiveCallActive) {
-        await startLiveCall();
-    } else {
-        stopLiveCall();
-    }
+    isLiveCallActive ? stopLiveCall() : await startLiveCall();
 }
 
 async function startLiveCall() {
     try {
-        // Web Audio for mic capture only (NOT for playback — playback uses HTML Audio)
         audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
         await audioCtx.audioWorklet.addModule('/audio-worklet.js');
 
@@ -106,8 +105,8 @@ async function startLiveCall() {
             audio: { channelCount: 1, sampleRate: 16000, echoCancellation: true, noiseSuppression: true }
         });
 
-        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        ws = new WebSocket(`${wsProtocol}//${window.location.host}/ws/audio`);
+        const wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        ws = new WebSocket(`${wsProto}//${window.location.host}/ws/audio`);
         ws.binaryType = 'arraybuffer';
 
         ws.onopen = () => {
@@ -118,36 +117,34 @@ async function startLiveCall() {
             workletNode = new AudioWorkletNode(audioCtx, 'vaani-audio-processor', {
                 processorOptions: { sampleRate: audioCtx.sampleRate }
             });
-
-            workletNode.port.onmessage = (event) => {
-                if (event.data.type === 'audio' && ws && ws.readyState === WebSocket.OPEN) {
-                    ws.send(event.data.buffer);
+            workletNode.port.onmessage = (ev) => {
+                if (ev.data.type === 'audio' && ws?.readyState === WebSocket.OPEN) {
+                    ws.send(ev.data.buffer);
                 }
             };
-
             source.connect(workletNode);
-            workletNode.connect(audioCtx.destination);
 
             callStartTime = Date.now();
             durationInterval = setInterval(() => {
-                els.metricDuration.textContent = `${((Date.now() - callStartTime) / 1000).toFixed(1)}s`;
+                if (els.metricDuration)
+                    els.metricDuration.textContent = `${((Date.now() - callStartTime) / 1000).toFixed(1)}s`;
             }, 100);
         };
 
-        ws.onmessage = (event) => {
-            if (typeof event.data === 'string') {
-                handleJsonMessage(JSON.parse(event.data));
-            } else if (event.data instanceof ArrayBuffer) {
-                // Raw PCM bytes from TTS server — accumulate into a WAV blob per turn
-                accumulatePCMChunk(event.data);
+        ws.onmessage = (ev) => {
+            if (typeof ev.data === 'string') {
+                handleJsonMessage(JSON.parse(ev.data));
+            } else if (ev.data instanceof ArrayBuffer) {
+                handleBinaryMessage(ev.data);
             }
         };
 
         ws.onclose = () => stopLiveCall();
-        ws.onerror = (err) => { console.error('WS Error:', err); stopLiveCall(); };
+        ws.onerror = (e) => { console.error('WS error:', e); stopLiveCall(); };
 
     } catch (err) {
-        alert('Failed to start live call: ' + err.message);
+        console.error('startLiveCall failed:', err);
+        alert('Could not start call: ' + err.message);
         stopLiveCall();
     }
 }
@@ -155,114 +152,127 @@ async function startLiveCall() {
 function stopLiveCall() {
     isLiveCallActive = false;
 
-    if (ws) { try { ws.close(); } catch (e) {} ws = null; }
+    finalizeDownloadButton();
+    stopAllAudio();
+
+    if (ws)          { try { ws.close(); } catch (e) {} ws = null; }
     if (workletNode) { try { workletNode.disconnect(); } catch (e) {} workletNode = null; }
-    if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
-    if (audioCtx) { try { audioCtx.close(); } catch (e) {} audioCtx = null; }
+    if (micStream)   { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
+    if (audioCtx)    { try { audioCtx.close(); } catch (e) {} audioCtx = null; }
     if (durationInterval) { clearInterval(durationInterval); durationInterval = null; }
 
-    finalizeAndAttachDownload();
-    stopAllAudio();
     updateCallUI('idle');
 }
 
+// UI State
 function updateCallUI(state) {
+    if (!els.geminiOrb) return;
     els.geminiOrb.className = `orb-container ${state}`;
-    if (state === 'idle') {
-        els.btnLiveCall.classList.remove('active-call');
-        els.callBtnText.textContent = 'Start Live Conversation';
-        els.orbIcon.textContent = '🎙️';
-        els.orbStatusText.textContent = 'Ready to Talk';
-        els.metricBargeIn.textContent = 'Active (Ready)';
-    } else if (state === 'connecting') {
-        els.btnLiveCall.classList.add('active-call');
-        els.callBtnText.textContent = 'End Call';
-        els.orbIcon.textContent = '⏳';
-        els.orbStatusText.textContent = 'Connecting...';
-    } else if (state === 'listening') {
-        els.btnLiveCall.classList.add('active-call');
-        els.callBtnText.textContent = 'End Call';
-        els.orbIcon.textContent = '👂';
-        els.orbStatusText.textContent = 'Listening to you...';
-        finalizeAndAttachDownload();
-    } else if (state === 'thinking') {
-        els.btnLiveCall.classList.add('active-call');
-        els.callBtnText.textContent = 'End Call';
-        els.orbIcon.textContent = '🧠';
-        els.orbStatusText.textContent = 'Thinking...';
-    } else if (state === 'speaking') {
-        els.btnLiveCall.classList.add('active-call');
-        els.callBtnText.textContent = 'End Call';
-        els.orbIcon.textContent = '🔊';
-        els.orbStatusText.textContent = 'Vaani is speaking...';
-    }
+
+    const configs = {
+        idle:       { btn: false, btnTxt: 'Start Live Conversation', icon: '🎙️', status: 'Ready to Talk' },
+        connecting: { btn: true,  btnTxt: 'End Call',                icon: '⏳', status: 'Connecting...' },
+        listening:  { btn: true,  btnTxt: 'End Call',                icon: '👂', status: 'Listening to you...' },
+        thinking:   { btn: true,  btnTxt: 'End Call',                icon: '🧠', status: 'Vaani is thinking...' },
+        speaking:   { btn: true,  btnTxt: 'End Call',                icon: '🔊', status: 'Vaani is speaking...' },
+    };
+    const c = configs[state] || configs.idle;
+    els.btnLiveCall?.classList.toggle('active-call', c.btn);
+    if (els.callBtnText)   els.callBtnText.textContent   = c.btnTxt;
+    if (els.orbIcon)       els.orbIcon.textContent       = c.icon;
+    if (els.orbStatusText) els.orbStatusText.textContent = c.status;
 }
 
-// ─────────────────────────────────────────────
-// Message Handling
-// ─────────────────────────────────────────────
-
+// Message Routing
 function handleJsonMessage(msg) {
-    if (msg.type === 'ready') {
-        updateCallUI('listening');
-    } else if (msg.type === 'state') {
-        updateCallUI(msg.state);
-    } else if (msg.type === 'transcription') {
-        finalizeAndAttachDownload();
-        appendChatBubble('user', msg.text);
-        activeAiBubble = null;
-        activeAiBubbleText = '';
-        turnWavChunks = [];
-        pendingByteQueue = new Uint8Array(0);
-    } else if (msg.type === 'ai_text') {
-        if (!activeAiBubble) {
-            activeAiBubble = appendChatBubble('ai', '');
+    switch (msg.type) {
+        case 'ready':
+            updateCallUI('listening');
+            break;
+
+        case 'state':
+            updateCallUI(msg.state);
+            if (msg.state === 'listening') {
+                // Barge-in: stop playback immediately
+                stopAllAudio();
+                finalizeDownloadButton();
+                activeAiBubble = null;
+                activeAiBubbleText = '';
+                turnWavBlobs = [];
+            }
+            break;
+
+        case 'transcription':
+            finalizeDownloadButton();
+            appendChatBubble('user', msg.text);
+            activeAiBubble = null;
             activeAiBubbleText = '';
-        }
-        activeAiBubbleText += msg.text;
-        activeAiBubble.querySelector('.chat-text').textContent = activeAiBubbleText;
-        scrollToBottom();
-    } else if (msg.type === 'metrics') {
-        if (msg.ttfa_ms) els.metricTTFA.textContent = `${msg.ttfa_ms} ms`;
-    } else if (msg.type === 'barge_in') {
-        stopAllAudio();
-        finalizeAndAttachDownload();
-        els.metricBargeIn.textContent = 'Interrupted!';
-        setTimeout(() => els.metricBargeIn.textContent = 'Active (Ready)', 2000);
+            turnWavBlobs = [];
+            expectingWavBlob = false;
+            break;
+
+        case 'ai_text':
+            if (!activeAiBubble) {
+                activeAiBubble = appendChatBubble('ai', '');
+            }
+            activeAiBubbleText += msg.text;
+            const textEl = activeAiBubble.querySelector('.chat-text');
+            if (textEl) textEl.textContent = activeAiBubbleText;
+            scrollToBottom();
+            break;
+
+        case 'audio_wav':
+            // The NEXT binary WebSocket message is a complete WAV file for this chunk
+            expectingWavBlob = true;
+            break;
+
+        case 'metrics':
+            if (msg.ttfa_ms && els.metricTTFA) {
+                els.metricTTFA.textContent = `${Math.round(msg.ttfa_ms)} ms`;
+            }
+            break;
+
+        case 'barge_in':
+            stopAllAudio();
+            if (els.metricBargeIn) {
+                els.metricBargeIn.textContent = 'Interrupted!';
+                setTimeout(() => {
+                    if (els.metricBargeIn) els.metricBargeIn.textContent = 'Active (Ready)';
+                }, 2000);
+            }
+            break;
+
+        case 'error':
+            console.error('Server error:', msg.message);
+            break;
     }
 }
 
-// ─────────────────────────────────────────────
-// PCM Accumulator → WAV Blob → HTML Audio Queue
-// ─────────────────────────────────────────────
+// Binary = WAV Blob
+function handleBinaryMessage(arrayBuffer) {
+    if (!expectingWavBlob) {
+        console.warn('Received unexpected binary message — ignoring');
+        return;
+    }
+    expectingWavBlob = false;
 
-function accumulatePCMChunk(arrayBuffer) {
-    // Step 1: Accumulate raw PCM bytes (2-byte aligned)
-    const incomingBytes = new Uint8Array(arrayBuffer);
-    const merged = new Uint8Array(pendingByteQueue.length + incomingBytes.length);
-    merged.set(pendingByteQueue, 0);
-    merged.set(incomingBytes, pendingByteQueue.length);
+    // Verify WAV magic bytes: "RIFF"
+    const h = new Uint8Array(arrayBuffer, 0, Math.min(4, arrayBuffer.byteLength));
+    if (h[0] !== 0x52 || h[1] !== 0x49 || h[2] !== 0x46 || h[3] !== 0x46) {
+        console.error('Binary message is not a WAV file (bad magic bytes)');
+        return;
+    }
 
-    const evenLen = Math.floor(merged.length / 2) * 2;
-    if (evenLen === 0) { pendingByteQueue = merged; return; }
-
-    const aligned = merged.subarray(0, evenLen);
-    pendingByteQueue = merged.subarray(evenLen);
-
-    // Step 2: Collect for per-turn download
-    turnWavChunks.push(new Uint8Array(aligned));
-
-    // Step 3: Create a proper WAV blob from these PCM bytes and queue for playback
-    const int16Samples = new Int16Array(aligned.buffer, aligned.byteOffset, aligned.byteLength / 2);
-    const wavBlob = buildWavBlob(int16Samples, 24000);
-    enqueueAudioBlob(wavBlob);
+    const blob = new Blob([arrayBuffer], { type: 'audio/wav' });
+    turnWavBlobs.push(blob);
+    enqueueWavBlob(blob);
 }
 
-function enqueueAudioBlob(wavBlob) {
-    audioQueue.push(wavBlob);
-    if (!isPlayingAudio) {
-        playNextInQueue();
-    }
+// Audio Queue
+function enqueueWavBlob(blob) {
+    const url = URL.createObjectURL(blob);
+    audioQueue.push(url);
+    if (!isPlayingAudio) playNextInQueue();
 }
 
 function playNextInQueue() {
@@ -272,136 +282,122 @@ function playNextInQueue() {
     }
 
     isPlayingAudio = true;
-    const blob = audioQueue.shift();
-    const url = URL.createObjectURL(blob);
+    const url = audioQueue.shift();
 
     currentAudio = new Audio(url);
     currentAudio.volume = 1.0;
 
     currentAudio.onended = () => {
         URL.revokeObjectURL(url);
+        currentAudio = null;
         playNextInQueue();
     };
 
     currentAudio.onerror = (e) => {
         console.error('Audio playback error:', e);
         URL.revokeObjectURL(url);
+        currentAudio = null;
         playNextInQueue();
     };
 
-    currentAudio.play().catch(e => {
-        console.error('Audio play() failed:', e);
+    currentAudio.play().catch(err => {
+        console.error('Audio.play() rejected:', err);
         URL.revokeObjectURL(url);
+        currentAudio = null;
         playNextInQueue();
     });
 }
 
 function stopAllAudio() {
+    audioQueue.forEach(u => URL.revokeObjectURL(u));
     audioQueue = [];
     isPlayingAudio = false;
+    expectingWavBlob = false;
+
     if (currentAudio) {
         currentAudio.onended = null;
         currentAudio.onerror = null;
-        try { currentAudio.pause(); } catch (e) {}
+        try { currentAudio.pause(); } catch (_) {}
         currentAudio.src = '';
         currentAudio = null;
     }
-    pendingByteQueue = new Uint8Array(0);
 }
 
-// ─────────────────────────────────────────────
-// Per-Turn Downloadable WAV File
-// ─────────────────────────────────────────────
-
-function finalizeAndAttachDownload() {
-    if (!activeAiBubble || turnWavChunks.length === 0) return;
-
+// Per-Turn Download Button
+function finalizeDownloadButton() {
+    if (!activeAiBubble || turnWavBlobs.length === 0) return;
     const slot = activeAiBubble.querySelector('.audio-download-slot');
     if (!slot || slot.innerHTML.trim()) return;
 
-    // Merge all PCM byte chunks into one Int16Array
-    const totalBytes = turnWavChunks.reduce((s, c) => s + c.length, 0);
-    const allBytes = new Uint8Array(totalBytes);
-    let offset = 0;
-    for (const chunk of turnWavChunks) { allBytes.set(chunk, offset); offset += chunk.length; }
-
-    const int16Samples = new Int16Array(allBytes.buffer, 0, allBytes.byteLength / 2);
-    const wavBlob = buildWavBlob(int16Samples, 24000);
-    const url = URL.createObjectURL(wavBlob);
-
-    slot.innerHTML = `
-        <a href="${url}" download="vaani_response_${Date.now()}.wav" class="btn-download-wav">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                <polyline points="7 10 12 15 17 10"></polyline>
-                <line x1="12" y1="15" x2="12" y2="3"></line>
-            </svg>
-            <span>Download Audio (WAV)</span>
-        </a>`;
-
-    turnWavChunks = [];
+    mergeWavBlobs(turnWavBlobs).then(mergedBlob => {
+        const url = URL.createObjectURL(mergedBlob);
+        slot.innerHTML = `
+            <a href="${url}" download="vaani_response_${Date.now()}.wav" class="btn-download-wav">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                    <polyline points="7 10 12 15 17 10"/>
+                    <line x1="12" y1="15" x2="12" y2="3"/>
+                </svg>
+                Download Audio (WAV)
+            </a>`;
+    });
+    turnWavBlobs = [];
 }
 
-// ─────────────────────────────────────────────
-// WAV Blob Builder Utility
-// ─────────────────────────────────────────────
+async function mergeWavBlobs(blobs) {
+    const sampleRate = 24000;
+    const pcmChunks = [];
+    let totalPcmBytes = 0;
 
-function buildWavBlob(int16Samples, sampleRate) {
-    const dataLen = int16Samples.length * 2;
-    const buf = new ArrayBuffer(44 + dataLen);
-    const v = new DataView(buf);
-
-    // RIFF header
-    writeStr(v, 0, 'RIFF');
-    v.setUint32(4, 36 + dataLen, true);
-    writeStr(v, 8, 'WAVE');
-    writeStr(v, 12, 'fmt ');
-    v.setUint32(16, 16, true);        // chunk size
-    v.setUint16(20, 1, true);         // PCM format
-    v.setUint16(22, 1, true);         // mono
-    v.setUint32(24, sampleRate, true);
-    v.setUint32(28, sampleRate * 2, true); // byte rate
-    v.setUint16(32, 2, true);         // block align
-    v.setUint16(34, 16, true);        // bits per sample
-    writeStr(v, 36, 'data');
-    v.setUint32(40, dataLen, true);
-
-    // PCM samples
-    let off = 44;
-    for (let i = 0; i < int16Samples.length; i++, off += 2) {
-        v.setInt16(off, int16Samples[i], true);
+    for (const blob of blobs) {
+        const buf = await blob.arrayBuffer();
+        if (buf.byteLength <= 44) continue;
+        const pcm = buf.slice(44);
+        pcmChunks.push(pcm);
+        totalPcmBytes += pcm.byteLength;
     }
 
-    return new Blob([buf], { type: 'audio/wav' });
+    const out = new ArrayBuffer(44 + totalPcmBytes);
+    const v = new DataView(out);
+    const s = (o, str) => { for (let i = 0; i < str.length; i++) v.setUint8(o + i, str.charCodeAt(i)); };
+
+    s(0,  'RIFF'); v.setUint32(4,  36 + totalPcmBytes, true);
+    s(8,  'WAVE'); s(12, 'fmt ');
+    v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+    v.setUint32(24, sampleRate, true); v.setUint32(28, sampleRate * 2, true);
+    v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+    s(36, 'data'); v.setUint32(40, totalPcmBytes, true);
+
+    let off = 44;
+    const outBytes = new Uint8Array(out);
+    for (const chunk of pcmChunks) { outBytes.set(new Uint8Array(chunk), off); off += chunk.byteLength; }
+
+    return new Blob([out], { type: 'audio/wav' });
 }
 
-function writeStr(view, offset, str) {
-    for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
-}
-
-// ─────────────────────────────────────────────
-// Chat Bubble Helpers
-// ─────────────────────────────────────────────
-
+// Chat Bubbles
 function appendChatBubble(sender, text) {
-    const placeholder = els.transcriptFeed.querySelector('.chat-placeholder');
+    const placeholder = els.transcriptFeed?.querySelector('.chat-placeholder');
     if (placeholder) placeholder.remove();
 
     const bubble = document.createElement('div');
     bubble.className = `chat-bubble ${sender}`;
     bubble.innerHTML = `
         <span class="chat-sender">${sender === 'user' ? 'You' : 'Vaani'}</span>
-        <span class="chat-text">${text}</span>
-        <div class="audio-download-slot"></div>
-    `;
-    els.transcriptFeed.appendChild(bubble);
+        <span class="chat-text">${escHtml(text)}</span>
+        <div class="audio-download-slot"></div>`;
+    els.transcriptFeed?.appendChild(bubble);
     scrollToBottom();
     return bubble;
 }
 
-function scrollToBottom() {
-    els.transcriptFeed.scrollTop = els.transcriptFeed.scrollHeight;
+function escHtml(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
-// Run
+function scrollToBottom() {
+    if (els.transcriptFeed) els.transcriptFeed.scrollTop = els.transcriptFeed.scrollHeight;
+}
+
+// Boot
 init();
