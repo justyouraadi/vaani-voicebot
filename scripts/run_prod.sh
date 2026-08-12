@@ -83,6 +83,8 @@ install_deps() {
 
     # vLLM pulls transformers>=4.44 automatically
     pip install -q "vllm==${VLLM_VERSION}"
+    # Pin transformers for vLLM 0.6.3 tokenizer compatibility
+    pip install -q "transformers==4.44.2"
 
     # Orchestrator deps (openai, httpx, websockets, etc.) in venv_llm too
     pip install -q -r "$PROJECT_DIR/orchestrator/requirements.txt"
@@ -112,11 +114,9 @@ install_deps() {
         -r "$PROJECT_DIR/tts-server/requirements.txt" \
         -r "$PROJECT_DIR/orchestrator/requirements.txt"
 
-    # Force reinstall coqpit (clean slate for Python 3.11 typing)
-    pip install -q --force-reinstall --no-deps coqpit
-
-    # Patch coqpit for Python 3.11
-    python3 "$PROJECT_DIR/scripts/patch_coqpit.py"
+    # coqui-tts fork uses coqpit-config now
+    pip install -q --force-reinstall --no-deps coqpit-config
+    # No patch needed for coqpit-config
 
     log_success "venv_audio ready!"
 }
