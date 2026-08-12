@@ -125,23 +125,22 @@ content = content.replace('safe_safe_issubclass', 'safe_issubclass')
 
 # ── Patch 3: Fix 'float | list[float]' Union deserialization crash ─────────
 # In Python 3.11, coqpit's _deserialize() raises ValueError when it sees a
-# plain float value for a field typed 'float | list[float]'.
-# Fix: in _deserialize, before the final raise, check if the value is already
-# an instance of the first concrete type in the union — if so, return it.
+# plain float (0.0) for a field typed 'float | list[float]'.
+# We replace ONLY the raise line with a check: if x already satisfies one of
+# the union member types, return it directly.
+# IMPORTANT: Do NOT use 'is_union' as a variable name — coqpit already defines
+# is_union as a local function in _deserialize, and re-using that name causes
+# an UnboundLocalError due to Python's scoping rules.
 old_raise = \"raise ValueError(f\\\" [!] '{type(x)}' value type of '{x}' does not match '{field_type}' field type.\\\")\"
-new_raise = \"\"\"# [PATCH] Try returning value as-is if it's already a valid primitive
-    try:
-        import types as _types
-        origin = getattr(field_type, '__origin__', None)
-        args   = getattr(field_type, '__args__', None)
-        # Handle X | Y (types.UnionType in 3.10+) and typing.Union
-        is_union = (origin is getattr(_types, 'UnionType', None)) or str(origin) == 'typing.Union'
-        if is_union and args:
-            for arg in args:
-                if arg is not type(None) and isinstance(x, arg):
+new_raise = \"\"\"# [PATCH] Accept value if it already matches any member of a union type
+    _union_members = getattr(field_type, '__args__', None)
+    if _union_members:
+        for _member in _union_members:
+            try:
+                if _member is not type(None) and isinstance(x, _member):
                     return x
-    except Exception:
-        pass
+            except TypeError:
+                pass
     raise ValueError(f\\\" [!] '{type(x)}' value type of '{x}' does not match '{field_type}' field type.\\\")\"\"\"
 
 content = content.replace(old_raise, new_raise)
