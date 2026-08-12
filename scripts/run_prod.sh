@@ -72,6 +72,9 @@ install_deps() {
         -r "$PROJECT_DIR/stt-server/requirements.txt" \
         --extra-index-url https://download.pytorch.org/whl/cu121
 
+    # Force reinstall coqpit (without dependencies) so coqpit.py starts completely clean
+    pip install -q --force-reinstall --no-deps coqpit
+
     # [PYTHON 3.11 FIX] Patch coqpit's broken checks for Python 3.11 Typing features
     python3 -c "
 import os, re, sys
@@ -85,6 +88,13 @@ with open(path, 'r') as f:
     content = f.read()
 
 original = content  # keep for change detection
+
+# ── Self-Healing: Strip any previous injections or corrupted patches ──────
+content = re.sub(
+    r'(?s)# \[PATCH\].*?raise ValueError\(f" \[!\] \'{type\(x\)}\' value type of \'{x}\' does not match \'{field_type}\' field type\."\)',
+    'raise ValueError(f\" [!] \'{type(x)}\' value type of \'{x}\' does not match \'{field_type}\' field type.\")',
+    content
+)
 
 # ── Patch 1: Fix UnionType NameError (Python 3.10+) ───────────────────────
 content = content.replace(
@@ -124,13 +134,6 @@ for target in [
 content = content.replace('safe_safe_issubclass', 'safe_issubclass')
 
 # ── Patch 3: Fix 'float | list[float]' Union deserialization crash ─────────
-# In Python 3.11, coqpit's _deserialize() raises ValueError when it sees a
-# plain float (0.0) for a field typed 'float | list[float]'.
-# We replace ONLY the raise line with a check: if x already satisfies one of
-# the union member types, return it directly.
-# IMPORTANT: Do NOT use 'is_union' as a variable name — coqpit already defines
-# is_union as a local function in _deserialize, and re-using that name causes
-# an UnboundLocalError due to Python's scoping rules.
 old_raise = \"raise ValueError(f\\\" [!] '{type(x)}' value type of '{x}' does not match '{field_type}' field type.\\\")\"
 new_raise = \"\"\"# [PATCH] Accept value if it already matches any member of a union type
     _union_members = getattr(field_type, '__args__', None)
