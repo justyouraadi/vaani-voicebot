@@ -30,7 +30,7 @@ log_warn()    { echo -e "${YELLOW}[WARN]${NC}  $1"; }
 log_error()   { echo -e "${RED}[ERROR]${NC} $1"; }
 
 # Version pins (override via env if needed)
-VLLM_VERSION="${VLLM_VERSION:-0.6.6.post2}"
+VLLM_VERSION="${VLLM_VERSION:-0.6.6.post1}"
 TORCH_LLM_VERSION="${TORCH_LLM_VERSION:-2.4.0}"
 TORCHVISION_LLM_VERSION="${TORCHVISION_LLM_VERSION:-0.19.0}"
 TORCHAUDIO_LLM_VERSION="${TORCHAUDIO_LLM_VERSION:-2.4.0}"
