@@ -87,14 +87,7 @@ if not os.path.exists(path):
 with open(path, 'r') as f:
     content = f.read()
 
-original = content  # keep for change detection
-
-# ── Self-Healing: Strip any previous injections or corrupted patches ──────
-content = re.sub(
-    r'(?s)# \[PATCH\].*?raise ValueError\(f" \[!\] \'{type\(x\)}\' value type of \'{x}\' does not match \'{field_type}\' field type\."\)',
-    'raise ValueError(f" [!] \'{type(x)}\' value type of \'{x}\' does not match \'{field_type}\' field type.")',
-    content
-)
+original = content
 
 # ── Patch 1: Fix UnionType NameError (Python 3.10+) ───────────────────────
 content = content.replace(
@@ -102,7 +95,7 @@ content = content.replace(
     'getattr(types, "UnionType", None)'
 )
 
-# ── Patch 2: Fix safe_issubclass (must be idempotent) ─────────────────────
+# ── Patch 2: Fix safe_issubclass (prevents TypeError on generic types) ────
 content = re.sub(
     r'(?s)def safe_issubclass\(cls, classinfo\).*?return False\s*',
     '',
@@ -129,20 +122,26 @@ for target in [
 
 content = content.replace('safe_safe_issubclass', 'safe_issubclass')
 
-# ── Patch 3: Fix 'float | list[float]' Union deserialization crash ─────────
-old_raise = 'raise ValueError(f" [!] \'{type(x)}\' value type of \'{x}\' does not match \'{field_type}\' field type.")'
-new_raise = '''# [PATCH] Accept value if it already matches any member of a union type
-    _union_members = getattr(field_type, '__args__', None)
-    if _union_members:
-        for _member in _union_members:
-            try:
-                if _member is not type(None) and isinstance(x, _member):
-                    return x
-            except TypeError:
-                pass
-    raise ValueError(f" [!] \'{type(x)}\' value type of \'{x}\' does not match \'{field_type}\' field type.")'''
+# ── Patch 3: Fix is_union() to support Python 3.10+ types.UnionType (|) ──
+# In Python 3.10+, union types like 'XttsAudioConfig | None' or 'float | list[float]'
+# use types.UnionType whose __origin__ is types.UnionType (NOT typing.Union).
+# Original coqpit is_union() returned False for types.UnionType, causing deserialization
+# to skip _deserialize_union() and crash with ValueError.
+new_is_union = '''def is_union(arg_type: Any) -> bool:
+    try:
+        import types as _types
+        origin = getattr(arg_type, "__origin__", None)
+        if origin is getattr(_types, "UnionType", None):
+            return True
+        return safe_issubclass(origin, Union)
+    except Exception:
+        return False'''
 
-content = content.replace(old_raise, new_raise)
+content = re.sub(
+    r'(?s)def is_union\(arg_type: Any\) -> bool:.*?return False',
+    new_is_union,
+    content
+)
 
 with open(path, 'w') as f:
     f.write(content)
