@@ -266,6 +266,66 @@ async def delete_voice(filename: str):
         logger.error(f"Error deleting voice {filename}: {e}")
         raise HTTPException(status_code=500, detail="Failed to delete voice")
 
+@app.get("/test-tts")
+async def test_tts():
+    """
+    Diagnostic endpoint: Generate a test WAV file using full (non-streaming) inference.
+    This isolates whether audio quality issues are in XTTS itself vs our streaming pipeline.
+    Returns a downloadable WAV file.
+    """
+    if tts_model is None:
+        raise HTTPException(status_code=503, detail="TTS model not loaded")
+
+    test_texts = [
+        ("नमस्ते! मैं वाणी बोल रही हूँ। आप कैसे हैं?", "hi"),
+        ("Hello! I am Vaani, your voice assistant. How are you today?", "en"),
+    ]
+
+    results = []
+    for text, lang in test_texts:
+        try:
+            if gpt_cond_latent is not None and speaker_embedding is not None:
+                result = tts_model.inference(
+                    text,
+                    lang,
+                    gpt_cond_latent=gpt_cond_latent,
+                    speaker_embedding=speaker_embedding,
+                    temperature=0.65,
+                    repetition_penalty=2.0,
+                    length_penalty=1.0,
+                    top_p=0.85,
+                    top_k=50,
+                )
+            else:
+                result = tts_model.inference(
+                    text,
+                    lang,
+                )
+            audio = result["wav"]
+            audio_np = audio.cpu().numpy() if isinstance(audio, torch.Tensor) else np.array(audio)
+            wav_bytes = numpy_to_wav_bytes(audio_np)
+
+            # Save test file
+            test_path = VOICES_DIR / f"_test_{lang}.wav"
+            with open(test_path, "wb") as f:
+                f.write(wav_bytes)
+
+            results.append({
+                "text": text,
+                "language": lang,
+                "samples": len(audio_np),
+                "duration_s": round(len(audio_np) / OUTPUT_SAMPLE_RATE, 2),
+                "file": str(test_path),
+                "status": "ok",
+            })
+            logger.info(f"Test TTS [{lang}]: {len(audio_np)} samples, {len(audio_np)/OUTPUT_SAMPLE_RATE:.2f}s")
+        except Exception as e:
+            results.append({"text": text, "language": lang, "status": "error", "error": str(e)})
+            logger.error(f"Test TTS [{lang}] error: {e}", exc_info=True)
+
+    return JSONResponse({"tests": results})
+
+
 @app.post("/synthesize")
 async def synthesize(request: SynthesizeRequest):
     """
@@ -330,104 +390,56 @@ async def _stream_synthesis(
     gpt_cond: Optional[torch.Tensor],
     speaker_emb: Optional[torch.Tensor],
     speed: float,
-    temperature: float,
-    top_p: float,
-    top_k: int,
-    repetition_penalty: float,
-    length_penalty: float,
+    temperature: float = 0.65,
+    top_p: float = 0.85,
+    top_k: int = 50,
+    repetition_penalty: float = 2.0,
+    length_penalty: float = 1.0,
 ):
     """
-    Generator that yields audio chunks as XTTS v2 generates them.
-    Time-to-first-chunk target: ~200ms on GPU.
+    Synthesize speech using full non-streaming inference().
+    This produces the same clean, high-quality audio as the Voice Cloner.
+    The sentence chunker upstream already splits text into manageable pieces.
     """
     start_time = time.perf_counter()
-    total_samples = 0
-    chunk_count = 0
-    first_chunk_time = None
 
     try:
         if gpt_cond is not None and speaker_emb is not None:
-            # For short text (<10 words), use full inference for cleaner output
-            word_count = len(text.split())
-            if word_count < 10:
-                logger.info(f"Short text ({word_count} words), using full inference for quality")
-                result = tts_model.inference(
-                    text,
-                    language,
-                    gpt_cond_latent=gpt_cond,
-                    speaker_embedding=speaker_emb,
-                    speed=speed,
-                    temperature=temperature,
-                    top_p=top_p,
-                    top_k=top_k,
-                    repetition_penalty=repetition_penalty,
-                    length_penalty=length_penalty,
-                )
-                audio = result["wav"]
-                audio_np = audio.cpu().numpy() if isinstance(audio, torch.Tensor) else np.array(audio)
-                yield numpy_to_pcm_bytes(audio_np)
-                return
-
-            # Streaming inference with voice cloning
-            chunks = tts_model.inference_stream(
+            logger.info(f"Full inference [voice cloning] lang={language}: \"{text[:60]}{'...' if len(text) > 60 else ''}\"")
+            result = tts_model.inference(
                 text,
                 language,
-                gpt_cond,
-                speaker_emb,
+                gpt_cond_latent=gpt_cond,
+                speaker_embedding=speaker_emb,
                 speed=speed,
                 temperature=temperature,
                 top_p=top_p,
                 top_k=top_k,
                 repetition_penalty=repetition_penalty,
                 length_penalty=length_penalty,
-                enable_text_splitting=False,  # We already chunk upstream — don't double-split
             )
         else:
-            # Fallback: full inference without cloning (no streaming possible without embeddings)
-            logger.warning("No voice embeddings available, using full synthesis")
+            logger.warning("No voice embeddings — using default XTTS speaker")
             result = tts_model.inference(
                 text,
                 language,
                 gpt_cond_latent=None,
                 speaker_embedding=None,
-                speed=speed,
-                temperature=temperature,
-                top_p=top_p,
-                top_k=top_k,
-                repetition_penalty=repetition_penalty,
-                length_penalty=length_penalty,
             )
-            audio = result["wav"]
-            audio_np = audio.cpu().numpy() if isinstance(audio, torch.Tensor) else np.array(audio)
-            yield numpy_to_pcm_bytes(audio_np)
-            return
 
-        for chunk in chunks:
-            if isinstance(chunk, torch.Tensor):
-                audio_np = chunk.cpu().numpy().squeeze()
-            else:
-                audio_np = np.array(chunk).squeeze()
+        audio = result["wav"]
+        audio_np = audio.cpu().numpy() if isinstance(audio, torch.Tensor) else np.array(audio)
+        audio_np = audio_np.squeeze()
 
-            if audio_np.size == 0:
-                continue
+        elapsed_ms = (time.perf_counter() - start_time) * 1000
+        duration_ms = (len(audio_np) / OUTPUT_SAMPLE_RATE) * 1000
+        logger.info(f"TTS inference: {duration_ms:.0f}ms audio in {elapsed_ms:.0f}ms (RTF={elapsed_ms/duration_ms:.2f})")
 
-            chunk_count += 1
-            total_samples += len(audio_np)
-
-            if first_chunk_time is None:
-                first_chunk_time = (time.perf_counter() - start_time) * 1000
-                logger.info(f"TTS first chunk in {first_chunk_time:.0f}ms ({len(audio_np)} samples)")
-
-            yield numpy_to_pcm_bytes(audio_np)
+        yield numpy_to_pcm_bytes(audio_np)
 
     except Exception as e:
-        logger.error(f"Streaming synthesis error: {e}", exc_info=True)
+        logger.error(f"TTS synthesis error: {e}", exc_info=True)
         raise
-
-    finally:
-        elapsed_ms = (time.perf_counter() - start_time) * 1000
-        duration_ms = (total_samples / OUTPUT_SAMPLE_RATE) * 1000 if total_samples > 0 else 0
-        rtf = elapsed_ms / duration_ms if duration_ms > 0 else 0
 
         logger.info(
             f"TTS complete: {chunk_count} chunks, "
