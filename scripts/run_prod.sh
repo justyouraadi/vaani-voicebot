@@ -30,13 +30,14 @@ log_warn()    { echo -e "${YELLOW}[WARN]${NC}  $1"; }
 log_error()   { echo -e "${RED}[ERROR]${NC} $1"; }
 
 # Version pins (override via env if needed)
-VLLM_VERSION="${VLLM_VERSION:-0.6.3.post1}"
+VLLM_VERSION="${VLLM_VERSION:-0.6.6.post2}"
 TORCH_LLM_VERSION="${TORCH_LLM_VERSION:-2.4.0}"
 TORCHVISION_LLM_VERSION="${TORCHVISION_LLM_VERSION:-0.19.0}"
 TORCHAUDIO_LLM_VERSION="${TORCHAUDIO_LLM_VERSION:-2.4.0}"
-# Audio stack (known-good for Coqui XTTS)
+# Audio stack
 TORCH_AUDIO_VERSION="${TORCH_AUDIO_VERSION:-2.3.0}"
-TRANSFORMERS_AUDIO_VERSION="${TRANSFORMERS_AUDIO_VERSION:-4.40.0}"
+# Don't pin transformers for audio - let coqui-tts pull its required version (>=4.57)
+# TRANSFORMERS_AUDIO_VERSION="${TRANSFORMERS_AUDIO_VERSION:-4.57.0}"
 
 print_banner() {
     echo -e "${CYAN}"
@@ -75,28 +76,27 @@ install_deps() {
     log_info "Installing vLLM stack: torch ${TORCH_LLM_VERSION}, vLLM ${VLLM_VERSION}..."
     pip install -q --upgrade pip
 
-    # vLLM 0.6.3.post1 needs torch 2.4.0 (cu124)
+    # vLLM 0.6.6.post2 needs torch 2.4.0 (cu124)
     pip install -q "torch==${TORCH_LLM_VERSION}" \
         "torchvision==${TORCHVISION_LLM_VERSION}" \
         "torchaudio==${TORCHAUDIO_LLM_VERSION}" \
         --extra-index-url https://download.pytorch.org/whl/cu124
 
-    # vLLM pulls transformers>=4.44 automatically
+    # vLLM pulls transformers>=4.45 automatically; pin to 4.51.3 for vLLM 0.6.6 compatibility
     pip install -q "vllm==${VLLM_VERSION}"
-    # Pin transformers for vLLM 0.6.3 tokenizer compatibility
-    pip install -q "transformers==4.44.2"
+    pip install -q "transformers==4.51.3"
 
     # Orchestrator deps (openai, httpx, websockets, etc.) in venv_llm too
     pip install -q -r "$PROJECT_DIR/orchestrator/requirements.txt"
 
     log_success "venv_llm ready!"
 
-    # ── venv_audio: Stable audio stack (torch 2.3, transformers 4.40) ────
+    # ── venv_audio: Audio stack (torch 2.3, transformers auto-pulled by coqui-tts) ────
     log_info "Creating venv_audio (STT/TTS/Orchestrator)..."
     python -m venv /workspace/venv_audio
     source /workspace/venv_audio/bin/activate
 
-    log_info "Installing audio stack: torch ${TORCH_AUDIO_VERSION}, transformers ${TRANSFORMERS_AUDIO_VERSION}..."
+    log_info "Installing audio stack: torch ${TORCH_AUDIO_VERSION}..."
     pip install -q --upgrade pip
 
     # Torch 2.3.0 cu121 works on CUDA 12.4 driver via LD_LIBRARY_PATH
@@ -105,10 +105,7 @@ install_deps() {
         "torchaudio==2.3.0" \
         --extra-index-url https://download.pytorch.org/whl/cu121
 
-    # Pin transformers for Coqui XTTS compatibility
-    pip install -q "transformers==${TRANSFORMERS_AUDIO_VERSION}"
-
-    # STT, TTS, Orchestrator requirements
+    # STT, TTS, Orchestrator requirements (coqui-tts will pull transformers>=4.57)
     pip install -q \
         -r "$PROJECT_DIR/stt-server/requirements.txt" \
         -r "$PROJECT_DIR/tts-server/requirements.txt" \
