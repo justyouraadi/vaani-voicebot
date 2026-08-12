@@ -52,7 +52,7 @@ def safe_issubclass(cls, classinfo) -> bool:
 
     content = content.replace('safe_safe_issubclass', 'safe_issubclass')
 
-    # 3. String field_type resolution at start of _deserialize() (PEP 563 fix)
+    # 3. String field_type resolution at start of _deserialize() (PEP 563 fix for string annotations)
     str_eval_code = """def _deserialize(x: Any, field_type: Any) -> Any:
     if isinstance(field_type, str):
         try:
@@ -71,27 +71,7 @@ def safe_issubclass(cls, classinfo) -> bool:
 
     content = content.replace('def _deserialize(x: Any, field_type: Any) -> Any:', str_eval_code)
 
-    # 4. Use get_type_hints in deserialize() method (PEP 563 fix for dataclass fields)
-    old_deserialize_loop = """        dataclass_fields = fields(self)
-
-        for field in dataclass_fields:"""
-
-    new_deserialize_loop = """        dataclass_fields = fields(self)
-        try:
-            type_hints = get_type_hints(self.__class__)
-        except Exception:
-            type_hints = {}
-
-        for field in dataclass_fields:
-            field_type = type_hints.get(field.name, field.type)"""
-
-    content = content.replace(old_deserialize_loop, new_deserialize_loop)
-    content = content.replace(
-        'value = _deserialize(value, field.type)',
-        'value = _deserialize(value, field_type)'
-    )
-
-    # 5. Patch is_union() to support Python 3.10+ types.UnionType (| syntax)
+    # 4. Patch is_union() to support Python 3.10+ types.UnionType (| syntax)
     new_is_union = """def is_union(arg_type: Any) -> bool:
     try:
         import types as _types
@@ -108,7 +88,7 @@ def safe_issubclass(cls, classinfo) -> bool:
         content
     )
 
-    # 6. Patch _deserialize_primitive_types to raise ValueError when x is not primitive
+    # 5. Patch _deserialize_primitive_types to raise ValueError when x is not primitive
     old_primitive = """    if isinstance(x, (str, bool)):
         return x
     if isinstance(x, (int, float)):
@@ -130,7 +110,7 @@ def safe_issubclass(cls, classinfo) -> bool:
 
     content = content.replace(old_primitive, new_primitive)
 
-    # 7. Patch _deserialize_union to handle None and catch TypeError/AttributeError
+    # 6. Patch _deserialize_union to handle None and catch TypeError/AttributeError
     old_union = """    for arg in field_type.__args__:
         # stop after first matching type in Union
         try:
