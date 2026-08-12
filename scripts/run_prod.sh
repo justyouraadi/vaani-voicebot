@@ -111,9 +111,9 @@ install_deps() {
         -r "$PROJECT_DIR/tts-server/requirements.txt" \
         -r "$PROJECT_DIR/orchestrator/requirements.txt"
 
-    # coqui-tts fork uses coqpit-config now
+    # coqui-tts fork uses coqpit-config; coqui-tts pulls coqpit as dep — replace it
+    pip uninstall -y -q coqpit 2>/dev/null || true
     pip install -q --force-reinstall --no-deps coqpit-config
-    # No patch needed for coqpit-config
 
     log_success "venv_audio ready!"
 }
@@ -184,6 +184,7 @@ start_services() {
         --gpu-memory-utilization 0.60 \
         --max-model-len 8128 \
         --enable-prefix-caching \
+        --disable-log-stats \
         2>&1 | tee -a vllm.log &
     VLLM_PID=$!
 
