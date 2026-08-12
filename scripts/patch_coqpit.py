@@ -70,7 +70,7 @@ def safe_issubclass(cls, classinfo) -> bool:
             pass
 """
 
-    content = content.replace('def _deserialize(x: Any, field_type: Any) -> Any:', str_eval_code)
+    content, n3 = re.subn(r'def _deserialize\([^)]*\)[^:]*:', str_eval_code, content, count=1)
 
     # 4. Patch is_union() to support Python 3.10+ types.UnionType (| syntax)
     new_is_union = """def is_union(arg_type: Any) -> bool:
@@ -83,33 +83,17 @@ def safe_issubclass(cls, classinfo) -> bool:
     except Exception:
         return False"""
 
-    content = re.sub(
-        r'(?s)def is_union\(arg_type: Any\) -> bool:.*?return False',
+    content, n4 = re.subn(
+        r'(?s)def is_union\(.*?\):.*?return False',
         new_is_union,
-        content
+        content,
+        count=1
     )
 
-    # 5. Patch _deserialize_primitive_types to raise ValueError when x is not primitive
-    old_primitive = """    if isinstance(x, (str, bool)):
-        return x
-    if isinstance(x, (int, float)):
-        if x == float("inf") or x == float("-inf"):
-            # if value type is inf return regardless.
-            return x
-        x = field_type(x)
-        return x"""
-
-    new_primitive = """    if isinstance(x, (str, bool)):
-        return x
-    if isinstance(x, (int, float)):
-        if x == float("inf") or x == float("-inf"):
-            # if value type is inf return regardless.
-            return x
-        x = field_type(x)
-        return x
-    raise ValueError(f"Expected primitive type {field_type}, got {type(x)}")"""
-
-    content = content.replace(old_primitive, new_primitive)
+    # 5. Patch _deserialize_primitive_types fallback
+    old_primitive = '        x = field_type(x)\n        return x'
+    new_primitive = '        x = field_type(x)\n        return x\n    raise ValueError(f"Expected primitive type {field_type}, got {type(x)}")'
+    content = content.replace(old_primitive, new_primitive, 1)
 
     # 6. Patch _deserialize_union to handle None and catch TypeError/AttributeError
     old_union = """    for arg in field_type.__args__:
@@ -138,12 +122,12 @@ def safe_issubclass(cls, classinfo) -> bool:
         return None
     raise ValueError(f" [!] '{type(x)}' value type of '{x}' does not match '{field_type}' field type.")"""
 
-    content = content.replace(old_union, new_union)
+    content = content.replace(old_union, new_union, 1)
 
     with open(path, "w", encoding="utf-8") as f:
         f.write(content)
 
-    print(f"✅ coqpit.py successfully patched for Python 3.11! ({original_length} -> {len(content)} bytes)")
+    print(f"✅ coqpit.py successfully patched for Python 3.11! ({original_length} -> {len(content)} bytes, n3={n3}, n4={n4})")
 
 if __name__ == "__main__":
     patch_coqpit()
