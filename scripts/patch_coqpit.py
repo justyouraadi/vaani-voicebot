@@ -67,7 +67,8 @@ def safe_issubclass(cls, classinfo) -> bool:
                     _ns.update({k: v for k, v in m.__dict__.items() if not k.startswith('_')})
             field_type = eval(field_type, _ns)
         except Exception:
-            pass"""
+            pass
+"""
 
     content = content.replace('def _deserialize(x: Any, field_type: Any) -> Any:', str_eval_code)
 
