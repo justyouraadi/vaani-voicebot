@@ -74,35 +74,83 @@ install_deps() {
 
     # [PYTHON 3.11 FIX] Patch coqpit's broken checks for Python 3.11 Typing features
     python3 -c "
-import os, re
+import os, re, sys
+
 path = '/workspace/venv/lib/python3.11/site-packages/coqpit/coqpit.py'
-if os.path.exists(path):
-    with open(path, 'r') as f: content = f.read()
-    
-    # 0. Self-healing: Strip out any existing/corrupted safe_issubclass definitions
-    content = re.sub(r'def safe_issubclass\(cls, classinfo\).*?return False\s*', '', content, flags=re.DOTALL)
-    content = content.replace('safe_issubclass', 'issubclass')
-    
-    # 1. Fix missing quotes around UnionType which causes NameError
-    content = content.replace('getattr(types, UnionType, None)', 'getattr(types, \"UnionType\", None)')
-    
-    # 2. Inject safe_issubclass cleanly at the VERY END of the file
-    safe_func = '''\n
+if not os.path.exists(path):
+    print('[WARN] coqpit.py not found — skipping patch')
+    sys.exit(0)
+
+with open(path, 'r') as f:
+    content = f.read()
+
+original = content  # keep for change detection
+
+# ── Patch 1: Fix UnionType NameError (Python 3.10+) ───────────────────────
+content = content.replace(
+    'getattr(types, UnionType, None)',
+    'getattr(types, \"UnionType\", None)'
+)
+
+# ── Patch 2: Fix safe_issubclass (must be idempotent) ─────────────────────
+# Strip out any previous/corrupted injections first
+content = re.sub(
+    r'(?s)def safe_issubclass\(cls, classinfo\).*?return False\s*',
+    '',
+    content
+)
+content = content.replace('safe_issubclass', 'issubclass')
+
+# Inject a clean safe_issubclass at file end
+safe_func = '''
+
 def safe_issubclass(cls, classinfo) -> bool:
     try:
         return issubclass(cls, classinfo)
     except TypeError:
         return False
 '''
-    content = content + safe_func
+content = content + safe_func
 
-    # 3. Replace dangerous issubclass calls
-    content = content.replace('issubclass(type(x), Serializable)', 'safe_issubclass(type(x), Serializable)')
-    content = content.replace('issubclass(x, Serializable)', 'safe_issubclass(x, Serializable)')
-    content = content.replace('issubclass(base_type, Serializable)', 'safe_issubclass(base_type, Serializable)')
-    content = content.replace('safe_safe_issubclass', 'safe_issubclass')
-    
-    with open(path, 'w') as f: f.write(content)
+# Replace dangerous raw issubclass calls with the safe version
+for target in [
+    'issubclass(type(x), Serializable)',
+    'issubclass(x, Serializable)',
+    'issubclass(base_type, Serializable)',
+]:
+    content = content.replace(target, 'safe_' + target)
+
+# Fix double-safe prefix if script run multiple times
+content = content.replace('safe_safe_issubclass', 'safe_issubclass')
+
+# ── Patch 3: Fix 'float | list[float]' Union deserialization crash ─────────
+# In Python 3.11, coqpit's _deserialize() raises ValueError when it sees a
+# plain float value for a field typed 'float | list[float]'.
+# Fix: in _deserialize, before the final raise, check if the value is already
+# an instance of the first concrete type in the union — if so, return it.
+old_raise = \"raise ValueError(f\\\" [!] '{type(x)}' value type of '{x}' does not match '{field_type}' field type.\\\")\"
+new_raise = \"\"\"# [PATCH] Try returning value as-is if it's already a valid primitive
+    try:
+        import types as _types
+        origin = getattr(field_type, '__origin__', None)
+        args   = getattr(field_type, '__args__', None)
+        # Handle X | Y (types.UnionType in 3.10+) and typing.Union
+        is_union = (origin is getattr(_types, 'UnionType', None)) or str(origin) == 'typing.Union'
+        if is_union and args:
+            for arg in args:
+                if arg is not type(None) and isinstance(x, arg):
+                    return x
+    except Exception:
+        pass
+    raise ValueError(f\\\" [!] '{type(x)}' value type of '{x}' does not match '{field_type}' field type.\\\")\"\"\"
+
+content = content.replace(old_raise, new_raise)
+
+with open(path, 'w') as f:
+    f.write(content)
+
+changed = 'YES' if content != original else 'NO (already patched)'
+print(f'coqpit.py patched successfully (changed={changed})')
 "
 
     log_success "All dependencies installed in venv!"
@@ -118,7 +166,7 @@ setup_env() {
 VLLM_BASE_URL=http://localhost:9000/v1
 VLLM_MODEL=Qwen/Qwen2.5-7B-Instruct
 VLLM_API_KEY=EMPTY
-LLM_MAX_TOKENS=256
+LLM_MAX_TOKENS=100
 LLM_TEMPERATURE=0.7
 
 STT_SERVER_URL=ws://localhost:9001/ws/transcribe
